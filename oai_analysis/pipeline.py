@@ -1,14 +1,15 @@
 import os
 import pathlib
 
-import numpy as np
-import itk
-import matplotlib.pyplot as plt
 import icon_registration.itk_wrapper as itk_wrapper
 import icon_registration.pretrained_models as pretrained_models
+import itk
+import matplotlib.pyplot as plt
+import vtk
 
-from analysis_object import AnalysisObject
 import mesh_processing as mp
+from analysis_object import AnalysisObject
+
 
 def cast_image_as(image, pixel_type):
     """
@@ -24,6 +25,16 @@ def cast_image_as(image, pixel_type):
     cast_filter_type.Update()
     itk_image = cast_filter_type.GetOutput()
     return itk_image
+
+
+def write_vtk_mesh(mesh, filename):
+    writer = vtk.vtkPolyDataWriter()
+    writer.SetFileName(filename)
+    writer.SetInputData(mesh)
+    writer.SetFileVersion(42)  # ITK does not support newer version (5.1)
+    writer.SetFileTypeToBinary()  # reading and writing binary files is faster
+    writer.Write()
+
 
 def analysis_pipeline(input_path, output_path):
     """
@@ -78,6 +89,8 @@ def analysis_pipeline(input_path, output_path):
     # Get the thickness map for the meshes
     distance_inner_FC, distance_outer_FC = mp.get_thickness_mesh(warped_image_FC, mesh_type='FC')
     distance_inner_TC, distance_outer_TC = mp.get_thickness_mesh(warped_image_TC, mesh_type='TC')
+    write_vtk_mesh(distance_inner_FC, output_path + '/distance_inner_FC.vtk')
+    write_vtk_mesh(distance_outer_FC, output_path + '/distance_outer_FC.vtk')
 
     # Get inner and outer meshes for the TC and FC atlas meshes
     prob_fc_atlas = itk.imread(DATA_DIR / "atlases/atlas_60_LEFT_baseline_NMI/atlas_fc.nii.gz")
@@ -101,7 +114,7 @@ def analysis_pipeline(input_path, output_path):
     plt.axis('off')
     plt.draw()
     plt.savefig(output_path + '/thickness_TC.png')
-    plt.show()
+    # plt.show()
 
     x, y, t = mp.project_thickness(mapped_mesh_fc, mesh_type='FC')
     plt.figure(figsize=(8, 6))
@@ -111,7 +124,7 @@ def analysis_pipeline(input_path, output_path):
     plt.axis('off')
     plt.draw()
     plt.savefig(output_path + '/thickness_FC.png')
-    plt.show()
+    # plt.show()
 
     out_image_path = os.path.join(output_path, "in_image.nrrd")
     itk.imwrite(in_image, out_image_path)  # for debugging

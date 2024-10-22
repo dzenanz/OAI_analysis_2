@@ -41,6 +41,7 @@ def transform_mesh(mesh, transform, filename_prefix, keep_intermediate_outputs):
     itk.meshwrite(t_mesh, filename_prefix + "_transformed.vtk", compression=True)
 
     transformed_mesh = mp.read_vtk_mesh(filename_prefix + "_transformed.vtk")
+    transformed_mesh.GetPointData().AddArray(mesh.GetPointData().GetArray(0))  # transfer thickness
 
     if keep_intermediate_outputs:
         write_vtk_mesh(mesh, filename_prefix + "_original.vtk")
@@ -75,18 +76,18 @@ def into_canonical_orientation(image, flip_left_right):
     return oriented_image
 
 
-def project_distance_to_atlas(thickness_image, atlas_mesh):
-    num_points = atlas_mesh.GetNumberOfPoints()
+def sample_distance_from_image(thickness_image, mesh):
+    num_points = mesh.GetNumberOfPoints()
     thickness = np.zeros(num_points, dtype=np.float32)
     for i in range(num_points):
-        point = atlas_mesh.GetPoint(i)
+        point = mesh.GetPoint(i)
         image_index = thickness_image.TransformPhysicalPointToIndex(point)
         thickness[i] = thickness_image.GetPixel(image_index)
 
     vtk_array = numpy_to_vtk(thickness, deep=True, array_type=vtk.VTK_FLOAT)
     vtk_array.SetName("vertex_thickness")
-    atlas_mesh.GetPointData().AddArray(vtk_array)
-    return atlas_mesh
+    mesh.GetPointData().AddArray(vtk_array)
+    return mesh
 
 
 def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_outputs):
@@ -149,23 +150,30 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
         itk.transformwrite(phi_AB, os.path.join(output_path, "resampling.tfm"))
         itk.transformwrite(phi_BA, os.path.join(output_path, "modelling.tfm"))
 
-    print("Transforming the thickness measurements to the atlas space")
-    transformed_fc_thickness = itk.resample_image_filter(
-        fc_thickness_image, transform=phi_AB, reference_image=atlas_image, use_reference_image=True)
-    transformed_tc_thickness = itk.resample_image_filter(
-        tc_thickness_image, transform=phi_AB, reference_image=atlas_image, use_reference_image=True)
+    print("Transferring the thickness from images to meshes")
+    fc_mesh_itk = mp.get_mesh_from_probability_map(FC_prob)
+    tc_mesh_itk = mp.get_mesh_from_probability_map(TC_prob)
+    fc_mesh = mp.itk_mesh_to_vtk_mesh(fc_mesh_itk)
+    tc_mesh = mp.itk_mesh_to_vtk_mesh(tc_mesh_itk)
+    fc_mesh = sample_distance_from_image(fc_thickness_image, fc_mesh)
+    tc_mesh = sample_distance_from_image(tc_thickness_image, tc_mesh)
     if keep_intermediate_outputs:
-        itk.imwrite(transformed_fc_thickness,
-                    os.path.join(output_path, "transformed_fc_thickness.nrrd"), compression=True)
-        itk.imwrite(transformed_tc_thickness,
-                    os.path.join(output_path, "transformed_tc_thickness.nrrd"), compression=True)
+        write_vtk_mesh(fc_mesh, output_path + "/fc_mesh_patient.vtk")
+        write_vtk_mesh(tc_mesh, output_path + "/tc_mesh_patient.vtk")
 
-    print("Mapping the thickness to the atlas mesh")
-    mapped_mesh_fc = project_distance_to_atlas(transformed_fc_thickness, inner_mesh_fc_atlas)
-    mapped_mesh_tc = project_distance_to_atlas(transformed_tc_thickness, inner_mesh_tc_atlas)
+    print("Transforming meshes into atlas space")
+    fc_mesh_atlas = transform_mesh(fc_mesh, phi_BA, output_path + "/fc_mesh", keep_intermediate_outputs)
+    tc_mesh_atlas = transform_mesh(tc_mesh, phi_BA, output_path + "/tc_mesh", keep_intermediate_outputs)
     if keep_intermediate_outputs:
-        write_vtk_mesh(mapped_mesh_fc, output_path + "/mapped_mesh_fc.vtk")
-        write_vtk_mesh(mapped_mesh_tc, output_path + "/mapped_mesh_tc.vtk")
+        write_vtk_mesh(fc_mesh_atlas, output_path + "/fc_mesh_atlas.vtk")
+        write_vtk_mesh(tc_mesh_atlas, output_path + "/tc_mesh_atlas.vtk")
+
+    print("Mapping thickness from patient meshes to the atlas")
+    mapped_mesh_fc = mp.map_attributes(fc_mesh_atlas, inner_mesh_fc_atlas)
+    mapped_mesh_tc = mp.map_attributes(tc_mesh_atlas, inner_mesh_tc_atlas)
+    if keep_intermediate_outputs:
+        write_vtk_mesh(mapped_mesh_fc, output_path + "/mapped_mesh_FC.vtk")
+        write_vtk_mesh(mapped_mesh_tc, output_path + "/mapped_mesh_TC.vtk")
 
     print("Projecting thickness to 2D")
     thickness_3d_to_2d(mapped_mesh_fc, mesh_type='FC', output_filename=output_path + '/thickness_FC')

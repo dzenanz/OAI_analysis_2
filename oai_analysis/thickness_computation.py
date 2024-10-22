@@ -68,9 +68,12 @@ def propagate_thickness(distance, distance_pixels, n_dilations, max_distance=250
 
 def compute_thickness(cartilage_probability, method=DistanceMapMethod.parabolic_morphology):
     mask_inside_value = 10.0
+
     # a value larger than the maximum possible thickness in pixel units
     max_distance = 100.0
-    expansion_padding = 5.0  # how many millimeters of extra propagation to use
+
+    # how many millimeters of extra propagation to use
+    expansion_padding = 2 * max(cartilage_probability.GetSpacing()) + 0.1
 
     # Compute a binary mask from the cartilage segmentation probability
     mask = itk.binary_threshold_image_filter(

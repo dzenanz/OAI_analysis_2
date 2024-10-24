@@ -232,8 +232,8 @@ def split_tibial_cartilage_surface(mesh, mesh_normals, mesh_centroids):
     # transfer 0/1 labels to -1/1 labels
     inner_outer_label_list = labels * 2 - 1
 
-    # set inner surface which contains mostly positive normals
-    if mesh_normals[inner_outer_label_list == -1, 1].mean() < 0:
+    # set inner surface which contains mostly negative normals
+    if mesh_normals[inner_outer_label_list == -1, 2].mean() > 0:
         inner_outer_label_list = -inner_outer_label_list
 
     inner_face_list = np.where(inner_outer_label_list == -1)[0]

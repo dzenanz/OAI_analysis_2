@@ -21,6 +21,7 @@ import trimesh
 import vtk
 from vtk.util import numpy_support as ns
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import normalize
 
 # Helper Functions for Mesh Processing
 
@@ -274,7 +275,7 @@ def split_femoral_cartilage_surface(mesh, face_normal, face_centroid, num_divisi
     center = (bbox_min + bbox_max) / 2
 
     inner_outer_label_list = np.zeros(mesh.GetNumberOfCells())  # up:1, down:-1
-    connect_direction = center - face_centroid
+    connect_direction = normalize(center - face_centroid, axis=1, norm='l2')
 
     dot_output = np.multiply(connect_direction, face_normal)
     y_coord = mesh_centroids_normalized[:, 1]

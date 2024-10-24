@@ -89,13 +89,9 @@ def compute_thickness(cartilage_probability, method=DistanceMapMethod.parabolic_
     # itk.imwrite(masked_distance, "masked_distance.nrrd", compression=True)
 
     # Compute the distance map in pixels
-    distance_px = distance_pixels(mask, method=method)
+    distance_px = distance_pixels(enlarged_mask, method=method)
     masked_distance_px = itk.mask_image_filter(distance_px, mask_image=enlarged_mask.astype(itk.SS))
-    inside_dist= int(np.ceil(np.max(distance_px)))
-    outside_dist = int(-np.floor(np.min(masked_distance_px)))
-    n_dilations = inside_dist + outside_dist
-    distance_px_padded = itk.add_image_filter(distance_px, outside_dist)  # make it strictly positive
-    masked_distance_px = itk.mask_image_filter(distance_px_padded, mask_image=enlarged_mask.astype(itk.SS))
+    n_dilations= int(np.ceil(np.max(distance_px)))
     # itk.imwrite(masked_distance_px, "masked_distance_px.nrrd", compression=True)
 
     # Propagate the thickness from a masked distance map to boundaries of the mask

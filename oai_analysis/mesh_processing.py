@@ -409,6 +409,22 @@ def get_thickness_mesh(itk_image, mesh_type="FC", num_iterations=150):
     # Get mesh from itk image
     itk_mesh = get_mesh_from_probability_map(itk_image)
     vtk_mesh = itk_mesh_to_vtk_mesh(itk_mesh)
+
+    # Keep the largest 1 (FC) or 2 (TC) regions
+    connect = vtk.vtkPolyDataConnectivityFilter()
+    connect.SetInputData(vtk_mesh)
+    connect.SetExtractionModeToAllRegions()
+    connect.Update()
+    region_sizes = ns.vtk_to_numpy(connect.GetRegionSizes())
+    sorted_indices = np.argsort(region_sizes)[::-1]
+    connect.SetExtractionModeToSpecifiedRegions()
+    connect.AddSpecifiedRegion(sorted_indices[0])
+    if mesh_type == "TC":
+        connect.AddSpecifiedRegion(sorted_indices[1])
+    connect.Update()
+    vtk_mesh = connect.GetOutput()
+
+    # Smooth extracted mesh
     mesh = smooth_mesh(vtk_mesh, num_iterations=num_iterations)
 
     # Split the mesh into inner and outer

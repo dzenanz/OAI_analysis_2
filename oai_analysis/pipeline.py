@@ -6,7 +6,6 @@ import itk
 import vtk
 from unigradicon import preprocess, get_unigradicon
 
-
 import mesh_processing as mp
 from analysis_object import AnalysisObject
 from cartilage_shape_processing import thickness_3d_to_2d
@@ -47,16 +46,21 @@ def transform_mesh(mesh, transform, filename_prefix, keep_intermediate_outputs):
     return transformed_mesh
 
 
-def into_canonical_orientation(image):
+def into_canonical_orientation(image, flip_left_right):
     """
     Reorient the given image into the canonical orientation.
 
     :param image: input image
+    :param flip_left_right: if True, flips the image left-right
     :return: reoriented image
     """
     dicom_lps = itk.SpatialOrientationEnums.ValidCoordinateOrientations_ITK_COORDINATE_ORIENTATION_RAI
     dicom_ras = itk.SpatialOrientationEnums.ValidCoordinateOrientations_ITK_COORDINATE_ORIENTATION_LPI
     dicom_pir = itk.SpatialOrientationEnums.ValidCoordinateOrientations_ITK_COORDINATE_ORIENTATION_ASL
+    if flip_left_right:
+        image_dir = itk.array_from_matrix(image.GetDirection())
+        image_dir[0, :] *= -1  # flip left-right
+        image.SetDirection(itk.matrix_from_array(image_dir))
     oriented_image = itk.orient_image_filter(
         image,
         use_image_direction=True,
@@ -93,8 +97,7 @@ def thickness_analysis(normalized_image, output_prefix=None):
     return distance_inner_FC, distance_inner_TC
 
 
-
-def analysis_pipeline(input_path, output_path, keep_intermediate_outputs):
+def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_outputs):
     """
     Computes cartilage thickness for femur and tibia from knee MRI.
 
@@ -102,7 +105,18 @@ def analysis_pipeline(input_path, output_path, keep_intermediate_outputs):
     :param output_path: path to the desired directory for outputs.
     """
     in_image = itk.imread(input_path, pixel_type=itk.F)
-    in_image = into_canonical_orientation(in_image)  # simplifies mesh processing
+    if pathlib.Path(input_path).is_dir():  # DICOM series
+        namesGenerator = itk.GDCMSeriesFileNames.New()
+        namesGenerator.SetUseSeriesDetails(True)
+        namesGenerator.SetDirectory(input_path)
+        first_slice = itk.imread(namesGenerator.GetInputFileNames()[0])
+        metadata = first_slice.GetMetaDataDictionary()
+    else:
+        metadata = in_image.GetMetaDataDictionary()
+    if metadata.HasKey("0008|103e"):
+        print(f"Laterality: {laterality}, Series description: {metadata['0008|103e']}")
+
+    in_image = into_canonical_orientation(in_image, laterality == "right")  # simplifies mesh processing
     in_image = preprocess(in_image, modality="mri")
     os.makedirs(output_path, exist_ok=True)  # also holds intermediate results
     if keep_intermediate_outputs:
@@ -147,22 +161,26 @@ def analysis_pipeline(input_path, output_path, keep_intermediate_outputs):
 
 
 if __name__ == "__main__":
-    test_cases = [
-        r"M:\Dev\Osteoarthritis\OAI_analysis_2\oai_analysis\data\test_data\colab_case\image_preprocessed.nii.gz",
-        r"M:\Dev\Osteoarthritis\NAS\OAIBaselineImages\results\0.C.2\9000798\20040924\10249506",
-        r"M:\Dev\Osteoarthritis\NAS\OAIBaselineImages\results\0.C.2\9000798\20040924\10249512",
-        r"M:\Dev\Osteoarthritis\NAS\OAIBaselineImages\results\0.C.2\9000798\20040924\10249516",
-        # r"M:\Dev\Osteoarthritis\NAS\OAIBaselineImages\results\0.C.2\9000798\20040924\10249517",  # parsed incorrectly
-    ]
+    test_cases = {
+        r"M:\Dev\Osteoarthritis\OAI_analysis_2\oai_analysis\data\test_data\colab_case\image_preprocessed.nii.gz": {
+            "laterality": "left", "name": "test_case"},
+        r"M:\Dev\Osteoarthritis\NAS\OAIBaselineImages\results\0.C.2\9000798\20040924\10249506": {
+            "laterality": "left", "name": "ENROLLMENT"},
+        r"M:\Dev\Osteoarthritis\NAS\OAIBaselineImages\results\0.C.2\9000798\20040924\10249512": {
+            "laterality": "right", "name": "ENROLLMENT"},
+        r"M:\Dev\Osteoarthritis\NAS\OAI12MonthImages\results\1.C.2\9000798\20051130\10612103": {
+            "laterality": "left", "name": "12_MONTH"},
+        r"M:\Dev\Osteoarthritis\NAS\OAI12MonthImages\results\1.C.2\9000798\20051130\10612109": {
+            "laterality": "right", "name": "12_MONTH"},
+        r"M:\Dev\Osteoarthritis\NAS\OAI18MonthImages\results\2.D.2\9000798\20060303\10876803": {
+            "laterality": "right", "name": "18_MONTH"},
+        r"M:\Dev\Osteoarthritis\NAS\OAI24MonthImages\results\3.C.2\9000798\20070112\11415506": {
+            "laterality": "left", "name": "24_MONTH"},
+        r"M:\Dev\Osteoarthritis\NAS\OAI24MonthImages\results\3.C.2\9000798\20070112\11415512": {
+            "laterality": "right", "name": "24_MONTH"},
+    }
 
-    for i, case in enumerate(test_cases):
-        print(f"\nProcessing case {case}")
-        output_path = f"./OAI_results/case_{i:03d}"
-        debugging_plots = False  # skip processing so plot options can be quickly experimented with
-        if debugging_plots:
-            mapped_mesh_fc = mp.read_vtk_mesh(output_path + "/mapped_mesh_fc.vtk")
-            mapped_mesh_tc = mp.read_vtk_mesh(output_path + "/mapped_mesh_tc.vtk")
-            thickness_3d_to_2d(mapped_mesh_fc, mesh_type='FC', output_filename=output_path + '/thickness_FC.png')
-            thickness_3d_to_2d(mapped_mesh_tc, mesh_type='TC', output_filename=output_path + '/thickness_TC.png')
-        else:
-            analysis_pipeline(case, output_path, keep_intermediate_outputs=True)
+    for case, case_info in test_cases.items():
+        print(f"\nProcessing {case}")
+        output_path = f"./OAI_results_2/{case_info['name']}_{case_info['laterality']}"
+        analysis_pipeline(case, output_path, case_info['laterality'], keep_intermediate_outputs=True)

@@ -6,7 +6,6 @@ import itk
 import numpy as np
 import vtk
 from unigradicon import preprocess, get_unigradicon
-from vtk import vtkPointLocator
 from vtk.util.numpy_support import numpy_to_vtk
 
 import mesh_processing as mp
@@ -191,6 +190,7 @@ if __name__ == "__main__":
     test_cases = {
         r"M:\Dev\Osteoarthritis\OAI_analysis_2\oai_analysis\data\test_data\colab_case\image_preprocessed.nii.gz": {
             "laterality": "left", "name": "test_case"},
+
         r"M:\Dev\Osteoarthritis\NAS\OAIBaselineImages\results\0.C.2\9000798\20040924\10249506": {
             "laterality": "left", "name": "ENROLLMENT"},
         r"M:\Dev\Osteoarthritis\NAS\OAIBaselineImages\results\0.C.2\9000798\20040924\10249512": {
@@ -205,6 +205,22 @@ if __name__ == "__main__":
             "laterality": "left", "name": "24_MONTH"},
         r"M:\Dev\Osteoarthritis\NAS\OAI24MonthImages\results\3.C.2\9000798\20070112\11415512": {
             "laterality": "right", "name": "24_MONTH"},
+        r"M:\Dev\Osteoarthritis\NAS\OAI36MonthImages\results\5.C.1\9000798\20071206\12149703": {
+            "laterality": "left", "name": "36_MONTH"},
+        r"M:\Dev\Osteoarthritis\NAS\OAI36MonthImages\results\5.C.1\9000798\20071206\12149709": {
+            "laterality": "right", "name": "36_MONTH"},
+        r"M:\Dev\Osteoarthritis\NAS\OAI48MonthImages\results\6.C.1\9000798\20081107\12623206": {
+            "laterality": "left", "name": "48_MONTH"},
+        r"M:\Dev\Osteoarthritis\NAS\OAI48MonthImages\results\6.C.1\9000798\20081107\12623212": {
+            "laterality": "right", "name": "48_MONTH"},
+        r"M:\Dev\Osteoarthritis\NAS\OAI72MonthImages\results\8.C.1\9000798\20100909\11018403": {
+            "laterality": "left", "name": "72_MONTH"},
+        r"M:\Dev\Osteoarthritis\NAS\OAI72MonthImages\results\8.C.1\9000798\20100909\11018410": {
+            "laterality": "right", "name": "72_MONTH"},
+        r"M:\Dev\Osteoarthritis\NAS\OAI96MonthImages\results\10.C.1\9000296\20120720\13556826": {
+            "laterality": "left", "name": "96_MONTH"},
+        r"M:\Dev\Osteoarthritis\NAS\OAI96MonthImages\results\10.C.1\9000296\20120720\13556833": {
+            "laterality": "right", "name": "96_MONTH"},
     }
 
     for case, case_info in test_cases.items():

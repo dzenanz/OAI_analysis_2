@@ -139,12 +139,6 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
         itk.transformwrite(phi_AB, os.path.join(output_path, "resampling.tfm"))
         itk.transformwrite(phi_BA, os.path.join(output_path, "modelling.tfm"))
 
-    print("Transferring the thickness from images to meshes")
-    fc_mesh_itk = mp.get_mesh_from_probability_map(FC_prob)
-    tc_mesh_itk = mp.get_mesh_from_probability_map(TC_prob)
-    fc_mesh = mp.itk_mesh_to_vtk_mesh(fc_mesh_itk)
-    tc_mesh = mp.itk_mesh_to_vtk_mesh(tc_mesh_itk)
-
     thickness_via_mesh_splitting = True
     if thickness_via_mesh_splitting:
         print("Computing the thickness map via mesh splitting into inner and outer")
@@ -155,6 +149,10 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
             write_vtk_mesh(tc_inner, output_path + "/TC_inner.vtk")
     else:
         print("Computing the thickness map via distance transformation from mask edges")
+        fc_mesh_itk = mp.get_mesh_from_probability_map(FC_prob)
+        tc_mesh_itk = mp.get_mesh_from_probability_map(TC_prob)
+        fc_mesh = mp.itk_mesh_to_vtk_mesh(fc_mesh_itk)
+        tc_mesh = mp.itk_mesh_to_vtk_mesh(tc_mesh_itk)
         fc_thickness_image, fc_distance, fc_mask = compute_thickness(FC_prob)
         tc_thickness_image, tc_distance, tc_mask = compute_thickness(TC_prob)
         fc_mesh = sample_distance_from_image(fc_thickness_image, fc_mesh)

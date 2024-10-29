@@ -3,8 +3,8 @@ import pathlib
 
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.interpolate import griddata
 import vtk
+from scipy.interpolate import griddata
 from vtk.util.numpy_support import vtk_to_numpy
 
 
@@ -57,8 +57,8 @@ def __map_thickness_to_2D_projection(embedded, thickness, ninter=100, min_thickn
     np.save(file=fpth_np, arr=zi)
 
     contour_num = 80
-    maxz = max(z)
-    plt.contourf(xi, yi, zi, np.arange(0.0, maxz + maxz / contour_num, maxz / contour_num))
+    maxz = max(z) * (contour_num + 1) / contour_num  # avoid rounding errors
+    plt.contourf(xi, yi, zi, np.linspace(0.0, maxz, contour_num + 1))
     plt.axis('equal')
     # plt.xlabel('xi', fontsize=16)
     # plt.ylabel('yi', fontsize=16)

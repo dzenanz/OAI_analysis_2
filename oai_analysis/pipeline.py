@@ -122,16 +122,6 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
         itk.imwrite(FC_prob, os.path.join(output_path, "FC_prob.nrrd"))
         itk.imwrite(TC_prob, os.path.join(output_path, "TC_prob.nrrd"))
 
-    fc_thickness_image, fc_distance, fc_mask = compute_thickness(FC_prob)
-    tc_thickness_image, tc_distance, tc_mask = compute_thickness(TC_prob)
-    if keep_intermediate_outputs:
-        itk.imwrite(fc_thickness_image, os.path.join(output_path, "fc_thickness_image.nrrd"), compression=True)
-        itk.imwrite(tc_thickness_image, os.path.join(output_path, "tc_thickness_image.nrrd"), compression=True)
-        itk.imwrite(fc_distance, os.path.join(output_path, "fc_distance.nrrd"), compression=True)
-        itk.imwrite(tc_distance, os.path.join(output_path, "tc_distance.nrrd"), compression=True)
-        itk.imwrite(fc_mask, os.path.join(output_path, "fc_mask-label.nrrd"), compression=True)
-        itk.imwrite(tc_mask, os.path.join(output_path, "tc_mask-label.nrrd"), compression=True)
-
     atlas_filename = DATA_DIR / "atlases/atlas_60_LEFT_baseline_NMI/atlas.nii.gz"
     atlas_image = itk.imread(atlas_filename, itk.F)
 
@@ -155,8 +145,26 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
     tc_mesh_itk = mp.get_mesh_from_probability_map(TC_prob)
     fc_mesh = mp.itk_mesh_to_vtk_mesh(fc_mesh_itk)
     tc_mesh = mp.itk_mesh_to_vtk_mesh(tc_mesh_itk)
-    fc_mesh = sample_distance_from_image(fc_thickness_image, fc_mesh)
-    tc_mesh = sample_distance_from_image(tc_thickness_image, tc_mesh)
+
+    thickness_via_mesh_splitting = True
+    if thickness_via_mesh_splitting:
+        print("Computing the thickness map via mesh splitting into inner and outer")
+        _, fc_mesh = mp.get_thickness_mesh(FC_prob, mesh_type='FC')
+        _, tc_mesh = mp.get_thickness_mesh(TC_prob, mesh_type='TC')
+    else:
+        print("Computing the thickness map via distance transformation from mask edges")
+        fc_thickness_image, fc_distance, fc_mask = compute_thickness(FC_prob)
+        tc_thickness_image, tc_distance, tc_mask = compute_thickness(TC_prob)
+        fc_mesh = sample_distance_from_image(fc_thickness_image, fc_mesh)
+        tc_mesh = sample_distance_from_image(tc_thickness_image, tc_mesh)
+        if keep_intermediate_outputs:
+            itk.imwrite(fc_thickness_image, os.path.join(output_path, "fc_thickness_image.nrrd"), compression=True)
+            itk.imwrite(tc_thickness_image, os.path.join(output_path, "tc_thickness_image.nrrd"), compression=True)
+            # itk.imwrite(fc_distance, os.path.join(output_path, "fc_distance.nrrd"), compression=True)
+            # itk.imwrite(tc_distance, os.path.join(output_path, "tc_distance.nrrd"), compression=True)
+            # itk.imwrite(fc_mask, os.path.join(output_path, "fc_mask-label.nrrd"), compression=True)
+            # itk.imwrite(tc_mask, os.path.join(output_path, "tc_mask-label.nrrd"), compression=True)
+
     if keep_intermediate_outputs:
         write_vtk_mesh(fc_mesh, output_path + "/fc_mesh_patient.vtk")
         write_vtk_mesh(tc_mesh, output_path + "/tc_mesh_patient.vtk")

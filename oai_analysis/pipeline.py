@@ -149,8 +149,11 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
     thickness_via_mesh_splitting = True
     if thickness_via_mesh_splitting:
         print("Computing the thickness map via mesh splitting into inner and outer")
-        _, fc_mesh = mp.get_thickness_mesh(FC_prob, mesh_type='FC')
-        _, tc_mesh = mp.get_thickness_mesh(TC_prob, mesh_type='TC')
+        fc_inner, fc_mesh = mp.get_thickness_mesh(FC_prob, mesh_type='FC')
+        tc_inner, tc_mesh = mp.get_thickness_mesh(TC_prob, mesh_type='TC')
+        if keep_intermediate_outputs:
+            write_vtk_mesh(fc_inner, output_path + "/FC_inner.vtk")
+            write_vtk_mesh(tc_inner, output_path + "/TC_inner.vtk")
     else:
         print("Computing the thickness map via distance transformation from mask edges")
         fc_thickness_image, fc_distance, fc_mask = compute_thickness(FC_prob)
@@ -158,34 +161,30 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
         fc_mesh = sample_distance_from_image(fc_thickness_image, fc_mesh)
         tc_mesh = sample_distance_from_image(tc_thickness_image, tc_mesh)
         if keep_intermediate_outputs:
-            itk.imwrite(fc_thickness_image, os.path.join(output_path, "fc_thickness_image.nrrd"), compression=True)
-            itk.imwrite(tc_thickness_image, os.path.join(output_path, "tc_thickness_image.nrrd"), compression=True)
-            # itk.imwrite(fc_distance, os.path.join(output_path, "fc_distance.nrrd"), compression=True)
-            # itk.imwrite(tc_distance, os.path.join(output_path, "tc_distance.nrrd"), compression=True)
-            # itk.imwrite(fc_mask, os.path.join(output_path, "fc_mask-label.nrrd"), compression=True)
-            # itk.imwrite(tc_mask, os.path.join(output_path, "tc_mask-label.nrrd"), compression=True)
+            itk.imwrite(fc_thickness_image, os.path.join(output_path, "FC_thickness_image.nrrd"), compression=True)
+            itk.imwrite(tc_thickness_image, os.path.join(output_path, "TC_thickness_image.nrrd"), compression=True)
 
     if keep_intermediate_outputs:
-        write_vtk_mesh(fc_mesh, output_path + "/fc_mesh_patient.vtk")
-        write_vtk_mesh(tc_mesh, output_path + "/tc_mesh_patient.vtk")
+        write_vtk_mesh(fc_mesh, output_path + "/FC_mesh_patient.vtk")
+        write_vtk_mesh(tc_mesh, output_path + "/TC_mesh_patient.vtk")
 
     print("Transforming meshes into atlas space")
-    fc_mesh_atlas = transform_mesh(fc_mesh, phi_BA, output_path + "/fc_mesh", keep_intermediate_outputs)
-    tc_mesh_atlas = transform_mesh(tc_mesh, phi_BA, output_path + "/tc_mesh", keep_intermediate_outputs)
+    fc_mesh_atlas = transform_mesh(fc_mesh, phi_BA, output_path + "/FC_mesh", False)
+    tc_mesh_atlas = transform_mesh(tc_mesh, phi_BA, output_path + "/TC_mesh", False)
     if keep_intermediate_outputs:
-        write_vtk_mesh(fc_mesh_atlas, output_path + "/fc_mesh_atlas.vtk")
-        write_vtk_mesh(tc_mesh_atlas, output_path + "/tc_mesh_atlas.vtk")
+        write_vtk_mesh(fc_mesh_atlas, output_path + "/FC_mesh_atlas.vtk")
+        write_vtk_mesh(tc_mesh_atlas, output_path + "/TC_mesh_atlas.vtk")
 
     print("Mapping thickness from patient meshes to the atlas")
     mapped_mesh_fc = mp.map_attributes(fc_mesh_atlas, inner_mesh_fc_atlas)
     mapped_mesh_tc = mp.map_attributes(tc_mesh_atlas, inner_mesh_tc_atlas)
     if keep_intermediate_outputs:
-        write_vtk_mesh(mapped_mesh_fc, output_path + "/mapped_mesh_FC.vtk")
-        write_vtk_mesh(mapped_mesh_tc, output_path + "/mapped_mesh_TC.vtk")
+        write_vtk_mesh(mapped_mesh_fc, output_path + "/FC_mapped_mesh.vtk")
+        write_vtk_mesh(mapped_mesh_tc, output_path + "/TC_mapped_mesh.vtk")
 
     print("Projecting thickness to 2D")
-    thickness_3d_to_2d(mapped_mesh_fc, mesh_type='FC', output_filename=output_path + '/thickness_FC')
-    thickness_3d_to_2d(mapped_mesh_tc, mesh_type='TC', output_filename=output_path + '/thickness_TC')
+    thickness_3d_to_2d(mapped_mesh_fc, mesh_type='FC', output_filename=output_path + '/FC_thickness')
+    thickness_3d_to_2d(mapped_mesh_tc, mesh_type='TC', output_filename=output_path + '/TC_thickness')
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ def main():
     parser = argparse.ArgumentParser(description='OAI Analysis CLI')
     parser.add_argument('input_path', type=str, help='Path to image file or directory containing DICOM series')
     parser.add_argument('output_dir', type=str, help='Directory to make output files')
+    parser.add_argument('laterality', type=str, help='Knee: left or right')
     parser.add_argument(
         '--no_intermediates',
         action='store_true',
@@ -17,7 +18,7 @@ def main():
 
     args = parser.parse_args()
 
-    analysis_pipeline(args.input_path, args.output_dir, not args.no_intermediates)
+    analysis_pipeline(args.input_path, args.output_dir, args.laterality, not args.no_intermediates)
 
 
 if __name__ == '__main__':

@@ -125,9 +125,9 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
     atlas_image = itk.imread(atlas_filename, itk.F)
 
     inner_mesh_fc_atlas = mp.read_vtk_mesh(
-        DATA_DIR / "atlases/atlas_60_LEFT_baseline_NMI/atlas_FC_inner_mesh_smooth.ply")
+        DATA_DIR / "atlases/atlas_60_LEFT_baseline_NMI/atlas_FC_inner_mesh_LPS.ply")
     inner_mesh_tc_atlas = mp.read_vtk_mesh(
-        DATA_DIR / "atlases/atlas_60_LEFT_baseline_NMI/atlas_TC_inner_mesh_smooth.ply")
+        DATA_DIR / "atlases/atlas_60_LEFT_baseline_NMI/atlas_TC_inner_mesh_LPS.ply")
 
     print("Registering the input image to the atlas")
     model = get_unigradicon()

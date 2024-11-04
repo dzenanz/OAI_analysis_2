@@ -121,7 +121,7 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
         itk.imwrite(FC_prob, os.path.join(output_path, "FC_prob.nrrd"))
         itk.imwrite(TC_prob, os.path.join(output_path, "TC_prob.nrrd"))
 
-    atlas_filename = DATA_DIR / "atlases/atlas_60_LEFT_baseline_NMI/atlas.nii.gz"
+    atlas_filename = DATA_DIR / "atlases/atlas_60_LEFT_baseline_NMI/atlas_image.nii.gz"
     atlas_image = itk.imread(atlas_filename, itk.F)
 
     inner_mesh_fc_atlas = mp.read_vtk_mesh(

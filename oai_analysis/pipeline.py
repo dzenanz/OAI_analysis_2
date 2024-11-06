@@ -134,7 +134,7 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
     model = get_unigradicon()
     in_image_D = in_image.astype(itk.D)
     atlas_image_D = atlas_image.astype(itk.D)
-    phi_AB, phi_BA = itk_wrapper.register_pair(model, in_image_D, atlas_image_D, finetune_steps=5)
+    phi_AB, phi_BA = itk_wrapper.register_pair(model, in_image_D, atlas_image_D, finetune_steps=2)
     if keep_intermediate_outputs:
         print("Saving registration results")
         itk.transformwrite(phi_AB, os.path.join(output_path, "resampling.tfm"))

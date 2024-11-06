@@ -1,5 +1,6 @@
 import os
 import pathlib
+import sys
 
 import icon_registration.itk_wrapper as itk_wrapper
 import itk
@@ -186,40 +187,44 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
 
 if __name__ == "__main__":
     test_cases = {
-        r"M:\Dev\Osteoarthritis\OAI_analysis_2\oai_analysis\data\test_data\colab_case\image_preprocessed.nii.gz": {
+        f"{DATA_DIR}/test_data/colab_case/image_preprocessed.nii.gz": {
             "laterality": "left", "name": "test_case"},
-
-        r"M:\Dev\Osteoarthritis\NAS\OAIBaselineImages\results\0.C.2\9000798\20040924\10249506": {
-            "laterality": "left", "name": "ENROLLMENT"},
-        r"M:\Dev\Osteoarthritis\NAS\OAIBaselineImages\results\0.C.2\9000798\20040924\10249512": {
-            "laterality": "right", "name": "ENROLLMENT"},
-        r"M:\Dev\Osteoarthritis\NAS\OAI12MonthImages\results\1.C.2\9000798\20051130\10612103": {
-            "laterality": "left", "name": "12_MONTH"},
-        r"M:\Dev\Osteoarthritis\NAS\OAI12MonthImages\results\1.C.2\9000798\20051130\10612109": {
-            "laterality": "right", "name": "12_MONTH"},
-        r"M:\Dev\Osteoarthritis\NAS\OAI18MonthImages\results\2.D.2\9000798\20060303\10876803": {
-            "laterality": "right", "name": "18_MONTH"},
-        r"M:\Dev\Osteoarthritis\NAS\OAI24MonthImages\results\3.C.2\9000798\20070112\11415506": {
-            "laterality": "left", "name": "24_MONTH"},
-        r"M:\Dev\Osteoarthritis\NAS\OAI24MonthImages\results\3.C.2\9000798\20070112\11415512": {
-            "laterality": "right", "name": "24_MONTH"},
-        r"M:\Dev\Osteoarthritis\NAS\OAI36MonthImages\results\5.C.1\9000798\20071206\12149703": {
-            "laterality": "left", "name": "36_MONTH"},
-        r"M:\Dev\Osteoarthritis\NAS\OAI36MonthImages\results\5.C.1\9000798\20071206\12149709": {
-            "laterality": "right", "name": "36_MONTH"},
-        r"M:\Dev\Osteoarthritis\NAS\OAI48MonthImages\results\6.C.1\9000798\20081107\12623206": {
-            "laterality": "left", "name": "48_MONTH"},
-        r"M:\Dev\Osteoarthritis\NAS\OAI48MonthImages\results\6.C.1\9000798\20081107\12623212": {
-            "laterality": "right", "name": "48_MONTH"},
-        r"M:\Dev\Osteoarthritis\NAS\OAI72MonthImages\results\8.C.1\9000798\20100909\11018403": {
-            "laterality": "left", "name": "72_MONTH"},
-        r"M:\Dev\Osteoarthritis\NAS\OAI72MonthImages\results\8.C.1\9000798\20100909\11018410": {
-            "laterality": "right", "name": "72_MONTH"},
-        r"M:\Dev\Osteoarthritis\NAS\OAI96MonthImages\results\10.C.1\9000296\20120720\13556826": {
-            "laterality": "left", "name": "96_MONTH"},
-        r"M:\Dev\Osteoarthritis\NAS\OAI96MonthImages\results\10.C.1\9000296\20120720\13556833": {
-            "laterality": "right", "name": "96_MONTH"},
     }
+    if len(sys.argv) > 1:
+        oai_dir = sys.argv[1]
+        oai_cases = {
+            f"{oai_dir}/OAIBaselineImages/results/0.C.2/9000798/20040924/10249506": {
+                "laterality": "left", "name": "ENROLLMENT"},
+            f"{oai_dir}/OAIBaselineImages/results/0.C.2/9000798/20040924/10249512": {
+                "laterality": "right", "name": "ENROLLMENT"},
+            f"{oai_dir}/OAI12MonthImages/results/1.C.2/9000798/20051130/10612103": {
+                "laterality": "left", "name": "12_MONTH"},
+            f"{oai_dir}/OAI12MonthImages/results/1.C.2/9000798/20051130/10612109": {
+                "laterality": "right", "name": "12_MONTH"},
+            f"{oai_dir}/OAI18MonthImages/results/2.D.2/9000798/20060303/10876803": {
+                "laterality": "right", "name": "18_MONTH"},
+            f"{oai_dir}/OAI24MonthImages/results/3.C.2/9000798/20070112/11415506": {
+                "laterality": "left", "name": "24_MONTH"},
+            f"{oai_dir}/OAI24MonthImages/results/3.C.2/9000798/20070112/11415512": {
+                "laterality": "right", "name": "24_MONTH"},
+            f"{oai_dir}/OAI36MonthImages/results/5.C.1/9000798/20071206/12149703": {
+                "laterality": "left", "name": "36_MONTH"},
+            f"{oai_dir}/OAI36MonthImages/results/5.C.1/9000798/20071206/12149709": {
+                "laterality": "right", "name": "36_MONTH"},
+            f"{oai_dir}/OAI48MonthImages/results/6.C.1/9000798/20081107/12623206": {
+                "laterality": "left", "name": "48_MONTH"},
+            f"{oai_dir}/OAI48MonthImages/results/6.C.1/9000798/20081107/12623212": {
+                "laterality": "right", "name": "48_MONTH"},
+            f"{oai_dir}/OAI72MonthImages/results/8.C.1/9000798/20100909/11018403": {
+                "laterality": "left", "name": "72_MONTH"},
+            f"{oai_dir}/OAI72MonthImages/results/8.C.1/9000798/20100909/11018410": {
+                "laterality": "right", "name": "72_MONTH"},
+            f"{oai_dir}/OAI96MonthImages/results/10.C.1/9000296/20120720/13556826": {
+                "laterality": "left", "name": "96_MONTH"},
+            f"{oai_dir}/OAI96MonthImages/results/10.C.1/9000296/20120720/13556833": {
+                "laterality": "right", "name": "96_MONTH"},
+        }
+        test_cases.update(oai_cases)
 
     for case, case_info in test_cases.items():
         print(f"\nProcessing {case}")

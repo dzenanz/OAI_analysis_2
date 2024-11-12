@@ -58,7 +58,8 @@ def __map_thickness_to_2D_projection(embedded, thickness, ninter=100, min_thickn
 
     contour_num = 80
     maxz = max(z) * (contour_num + 1) / contour_num  # avoid rounding errors
-    plt.contourf(xi, yi, zi, np.linspace(0.0, maxz, contour_num + 1))
+    eps = maxz - max(z)
+    plt.contourf(xi, yi, zi, np.linspace(-eps, maxz, contour_num + 1))
     plt.axis('equal')
     # plt.xlabel('xi', fontsize=16)
     # plt.ylabel('yi', fontsize=16)

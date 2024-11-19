@@ -140,20 +140,34 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
         itk.transformwrite(phi_AB, os.path.join(output_path, "resampling.tfm"))
         itk.transformwrite(phi_BA, os.path.join(output_path, "modelling.tfm"))
 
+    print("Computing the thickness map")
+    # Get mesh from itk image
+    fc_mesh_itk = mp.get_mesh_from_probability_map(FC_prob)
+    tc_mesh_itk = mp.get_mesh_from_probability_map(TC_prob)
+    fc_mesh = mp.itk_mesh_to_vtk_mesh(fc_mesh_itk)
+    tc_mesh = mp.itk_mesh_to_vtk_mesh(tc_mesh_itk)
+
     thickness_via_mesh_splitting = True
     if thickness_via_mesh_splitting:
         print("Computing the thickness map via mesh splitting into inner and outer")
-        fc_inner, fc_mesh = mp.get_thickness_mesh(FC_prob, mesh_type='FC')
-        tc_inner, tc_mesh = mp.get_thickness_mesh(TC_prob, mesh_type='TC')
+        # Transform to atlas space for splitting
+        fc_mesh_atlas = transform_mesh(fc_mesh, phi_BA, output_path + "/FC_mesh", False)
+        tc_mesh_atlas = transform_mesh(tc_mesh, phi_BA, output_path + "/TC_mesh", False)
+        fc_inner_atlas, fc_outer_atlas = mp.get_split_mesh(fc_mesh_atlas, mesh_type='FC')
+        tc_inner_atlas, tc_outer_atlas = mp.get_split_mesh(tc_mesh_atlas, mesh_type='TC')
+
+        # Transform back to patient space for distance measuring
+        fc_inner_patient = transform_mesh(fc_inner_atlas, phi_AB, output_path + "/FC_mesh", False)
+        fc_outer_patient = transform_mesh(fc_outer_atlas, phi_AB, output_path + "/FC_mesh", False)
+        tc_inner_patient = transform_mesh(tc_inner_atlas, phi_AB, output_path + "/TC_mesh", False)
+        tc_outer_patient = transform_mesh(tc_outer_atlas, phi_AB, output_path + "/TC_mesh", False)
+        fc_inner, fc_mesh = mp.get_distance(fc_inner_patient, fc_outer_patient)
+        tc_inner, tc_mesh = mp.get_distance(tc_inner_patient, tc_outer_patient)
         if keep_intermediate_outputs:
             write_vtk_mesh(fc_inner, output_path + "/FC_inner.vtk")
             write_vtk_mesh(tc_inner, output_path + "/TC_inner.vtk")
     else:
         print("Computing the thickness map via distance transformation from mask edges")
-        fc_mesh_itk = mp.get_mesh_from_probability_map(FC_prob)
-        tc_mesh_itk = mp.get_mesh_from_probability_map(TC_prob)
-        fc_mesh = mp.itk_mesh_to_vtk_mesh(fc_mesh_itk)
-        tc_mesh = mp.itk_mesh_to_vtk_mesh(tc_mesh_itk)
         fc_thickness_image, fc_distance, fc_mask = compute_thickness(FC_prob)
         tc_thickness_image, tc_distance, tc_mask = compute_thickness(TC_prob)
         fc_mesh = sample_distance_from_image(fc_thickness_image, fc_mesh)

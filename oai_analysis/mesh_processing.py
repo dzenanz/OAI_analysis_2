@@ -401,16 +401,12 @@ def split_mesh(mesh, mesh_type="FC"):
 
 
 # Obtain the thickness of the input itk_image by creating a mesh and splitting it.
-def get_thickness_mesh(itk_image, mesh_type="FC", num_iterations=150):
+def get_split_mesh(vtk_mesh, mesh_type="FC", num_iterations=150):
     """
     Takes the probability map obtained from the segmentation algorithm as an itk image.
     Constructs a VTK mesh from it and returns the thickness between the inner and outer splitted mesh.
     Takes as argument the type of mesh 'FC' or 'TC'.
     """
-    # Get mesh from itk image
-    itk_mesh = get_mesh_from_probability_map(itk_image)
-    vtk_mesh = itk_mesh_to_vtk_mesh(itk_mesh)
-
     # Keep the largest 1 (FC) or 2 (TC) regions
     connect = vtk.vtkPolyDataConnectivityFilter()
     connect.SetInputData(vtk_mesh)
@@ -431,9 +427,7 @@ def get_thickness_mesh(itk_image, mesh_type="FC", num_iterations=150):
     # Split the mesh into inner and outer
     inner_mesh, outer_mesh = split_mesh(mesh, mesh_type)
 
-    # Get the distance between inner and outer mesh
-    distance_inner, distance_outer = get_distance(inner_mesh, outer_mesh)
-    return distance_inner, distance_outer
+    return inner_mesh, outer_mesh
 
 
 # Map the attributes from the source mesh to target mesh (atlas mesh)

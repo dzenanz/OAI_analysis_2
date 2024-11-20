@@ -6,7 +6,7 @@ import icon_registration.itk_wrapper as itk_wrapper
 import itk
 import numpy as np
 import vtk
-from unigradicon import preprocess, get_unigradicon
+from unigradicon import get_unigradicon
 from vtk.util.numpy_support import numpy_to_vtk
 
 import mesh_processing as mp
@@ -49,6 +49,18 @@ def transform_mesh(mesh, transform, filename_prefix, keep_intermediate_outputs):
         os.remove(filename_prefix + "_transformed.vtk")
 
     return transformed_mesh
+
+
+def preprocess(image, window_min_percentile=0.1, window_max_percentile=99.9, output_min=0.0, output_max=1.0):
+    image_array = itk.GetArrayViewFromImage(image)
+    win_min = float(np.percentile(image_array, window_min_percentile))
+    win_max = float(np.percentile(image_array, window_max_percentile))
+    result = itk.intensity_windowing_image_filter(image,
+                                                  window_minimum=win_min,
+                                                  window_maximum=win_max,
+                                                  output_minimum=output_min,
+                                                  output_maximum=output_max)
+    return result
 
 
 def into_canonical_orientation(image, flip_left_right):
@@ -110,7 +122,7 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
         print(f"Laterality: {laterality}, Series description: {metadata['0008|103e']}")
 
     in_image = into_canonical_orientation(in_image, laterality == "right")  # simplifies mesh processing
-    in_image = preprocess(in_image, modality="mri")
+    in_image = preprocess(in_image)
     os.makedirs(output_path, exist_ok=True)  # also holds intermediate results
     if keep_intermediate_outputs:
         itk.imwrite(in_image, os.path.join(output_path, "in_image.nrrd"))

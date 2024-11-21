@@ -56,13 +56,8 @@ def __map_thickness_to_2D_projection(embedded, thickness, ninter=100, min_thickn
     # zi now has the thickness, we can write this out as a numpy file
     np.save(file=fpth_np, arr=zi)
 
-    contour_num = 80
-    maxz = max(z) * (contour_num + 1) / contour_num  # avoid rounding errors
-    eps = maxz - max(z)
-    plt.contourf(xi, yi, zi, np.linspace(-eps, maxz, contour_num + 1))
+    plt.imshow(np.flipud(zi), extent=(xmin - interx * 5, xmax + interx * 5, ymin - intery * 5, ymax + intery * 5))
     plt.axis('equal')
-    # plt.xlabel('xi', fontsize=16)
-    # plt.ylabel('yi', fontsize=16)
     plt.axis('off')
     plt.colorbar().ax.tick_params(labelsize=10)
     font = {'size': 10}

@@ -165,8 +165,8 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
         # Transform to atlas space for splitting
         fc_mesh_atlas = transform_mesh(fc_mesh, phi_BA, output_path + "/FC_mesh", False)
         tc_mesh_atlas = transform_mesh(tc_mesh, phi_BA, output_path + "/TC_mesh", False)
-        fc_inner_atlas, fc_outer_atlas = mp.get_split_mesh(fc_mesh_atlas, mesh_type='FC')
-        tc_inner_atlas, tc_outer_atlas = mp.get_split_mesh(tc_mesh_atlas, mesh_type='TC')
+        fc_inner_atlas, fc_outer_atlas = mp.get_split_mesh(fc_mesh_atlas, inner_mesh_fc_atlas, mesh_type='FC')
+        tc_inner_atlas, tc_outer_atlas = mp.get_split_mesh(tc_mesh_atlas, inner_mesh_tc_atlas, mesh_type='TC')
 
         # Transform back to patient space for distance measuring
         fc_inner_patient = transform_mesh(fc_inner_atlas, phi_AB, output_path + "/FC_mesh", False)

@@ -20,8 +20,13 @@ import itk
 import trimesh
 import vtk
 from vtk.util import numpy_support as ns
+from vtkmodules.vtkCommonCore import reference
+from vtk import vtkPointLocator, vtkKdTreePointLocator
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import normalize
+
+from oai_analysis.pipeline import write_vtk_mesh
+
 
 # Helper Functions for Mesh Processing
 
@@ -401,28 +406,62 @@ def split_mesh(mesh, mesh_type="FC"):
 
 
 # Obtain the thickness of the input itk_image by creating a mesh and splitting it.
-def get_split_mesh(vtk_mesh, mesh_type="FC", num_iterations=150):
+def get_split_mesh(vtk_mesh, atlas_mesh, mesh_type="FC", num_iterations=150, distance_threshold_mm=10.0):
     """
     Takes the probability map obtained from the segmentation algorithm as an itk image.
     Constructs a VTK mesh from it and returns the thickness between the inner and outer splitted mesh.
     Takes as argument the type of mesh 'FC' or 'TC'.
+    atlas_mesh is used for island filtering - we keep islands close to it
     """
     # Keep the largest 1 (FC) or 2 (TC) regions
     connect = vtk.vtkPolyDataConnectivityFilter()
     connect.SetInputData(vtk_mesh)
     connect.SetExtractionModeToAllRegions()
+    connect.ColorRegionsOn()
     connect.Update()
     region_sizes = ns.vtk_to_numpy(connect.GetRegionSizes())
     sorted_indices = np.argsort(region_sizes)[::-1]
+    # Usual sizes: FC 150k, TC 2x 25k
+
+    # Let's keep all the regions bigger than 10k, and at least 1 for FC and 2 for TC
+    # We also use size as the centroid of a curved cartilage surfaces could be far from atlas mesh
+    indices_to_keep = [sorted_indices[0]]  # The largest region
+
+    region_iterator = 1
+    while region_iterator < len(sorted_indices) and region_sizes[sorted_indices[region_iterator]] > 10000:
+        indices_to_keep.append(sorted_indices[region_iterator])
+        region_iterator += 1
+
+    if mesh_type == "TC" and region_iterator < 2:
+        indices_to_keep.append(sorted_indices[1])  # Second largest region
+        region_iterator += 1
+
+    # now check island centroid's distance to the atlas mesh and keep the close ones
+    cc = connect.GetOutput()
+    region_ids = ns.vtk_to_numpy(cc.GetPointData().GetScalars())
+    vertices = ns.vtk_to_numpy(cc.GetPoints().GetData())
+    locator = vtkPointLocator()
+    locator.SetDataSet(atlas_mesh)
+    locator.BuildLocator()
+    np.set_printoptions(precision=2)
+    while region_iterator < len(sorted_indices):
+        region = sorted_indices[region_iterator]
+        region_vertices = vertices[region_ids == region]
+        region_centroid = np.mean(region_vertices, axis=0)
+        dist2 = reference(-1.0)
+        locator.FindClosestPointWithinRadius(distance_threshold_mm, region_centroid, dist2)
+        if 0 <= dist2 < distance_threshold_mm ** 2:
+            indices_to_keep.append(region)
+        region_iterator += 1
+
     connect.SetExtractionModeToSpecifiedRegions()
-    connect.AddSpecifiedRegion(sorted_indices[0])
-    if mesh_type == "TC":
-        connect.AddSpecifiedRegion(sorted_indices[1])
+    for keep in indices_to_keep:
+        connect.AddSpecifiedRegion(keep)
     connect.Update()
-    vtk_mesh = connect.GetOutput()
+    cc = connect.GetOutput()
 
     # Smooth extracted mesh
-    mesh = smooth_mesh(vtk_mesh, num_iterations=num_iterations)
+    mesh = smooth_mesh(cc, num_iterations=num_iterations)
 
     # Split the mesh into inner and outer
     inner_mesh, outer_mesh = split_mesh(mesh, mesh_type)

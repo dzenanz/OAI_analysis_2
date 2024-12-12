@@ -152,12 +152,15 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
         itk.transformwrite(phi_AB, os.path.join(output_path, "resampling.tfm"))
         itk.transformwrite(phi_BA, os.path.join(output_path, "modelling.tfm"))
 
-    print("Computing the thickness map")
+    print("Converting segmentation probability images to meshes")
     # Get mesh from itk image
     fc_mesh_itk = mp.get_mesh_from_probability_map(FC_prob)
     tc_mesh_itk = mp.get_mesh_from_probability_map(TC_prob)
     fc_mesh = mp.itk_mesh_to_vtk_mesh(fc_mesh_itk)
     tc_mesh = mp.itk_mesh_to_vtk_mesh(tc_mesh_itk)
+    if keep_intermediate_outputs:
+        write_vtk_mesh(fc_mesh, output_path + "/FC_mesh_patient.vtk")
+        write_vtk_mesh(tc_mesh, output_path + "/TC_mesh_patient.vtk")
 
     thickness_via_mesh_splitting = True
     if thickness_via_mesh_splitting:
@@ -189,8 +192,8 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
             itk.imwrite(tc_thickness_image, os.path.join(output_path, "TC_thickness_image.nrrd"), compression=True)
 
     if keep_intermediate_outputs:
-        write_vtk_mesh(fc_mesh, output_path + "/FC_mesh_patient.vtk")
-        write_vtk_mesh(tc_mesh, output_path + "/TC_mesh_patient.vtk")
+        write_vtk_mesh(fc_mesh, output_path + "/FC_outer.vtk")
+        write_vtk_mesh(tc_mesh, output_path + "/TC_outer.vtk")
 
     print("Transforming meshes into atlas space")
     fc_mesh_atlas = transform_mesh(fc_mesh, phi_BA, output_path + "/FC_mesh", False)

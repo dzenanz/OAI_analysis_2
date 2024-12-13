@@ -15,6 +15,7 @@ authors = [
   { name = "Hastings Greer", email = "hastings.greer@gmail.com" },
   { name = "Matt McCormick", email = "matt@mmmccormick.com" },
   { name = "Pranjal Sahu", email = "pranjalsahu5@gmail.com" },
+  { name = "Dženan Zukić", email = "dzenan.zukic@kitware.com" },
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -27,18 +28,18 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-  "torch",
-  "itk",
-  "itk-cuberille",
-  "itk-parabolicmorphology",
-  "trimesh",
-  "vtk",
-  "icon_registration",
-  "unigradicon",
-  "pooch",
-  "scikit-image",
-  "scikit-learn",
-  "zarr",
+  "torch==2.4.1+cu124",
+  "itk==5.4.0",
+  "itk-cuberille==2.7.0",
+  "itk-parabolicmorphology==1.3.1",
+  "trimesh==4.4.9",
+  "vtk==9.3.1",
+  "icon_registration==1.1.5",
+  "unigradicon==1.0.3",
+  "pooch==1.8.2",
+  "scikit-image==0.24.0",
+  "scikit-learn==1.5.1",
+  "zarr==2.18.3",
 ]
 
 [project.urls]

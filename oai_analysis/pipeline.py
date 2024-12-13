@@ -3,6 +3,7 @@ import pathlib
 import sys
 
 import icon_registration.itk_wrapper as itk_wrapper
+import icon_registration.pretrained_models as pretrained_models
 import itk
 import numpy as np
 import vtk
@@ -143,7 +144,7 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
         DATA_DIR / "atlases/atlas_60_LEFT_baseline_NMI/atlas_TC_inner_mesh_LPS.ply")
 
     print("Registering the input image to the atlas")
-    model = get_unigradicon()
+    model = pretrained_models.OAI_knees_registration_model()
     in_image_D = in_image.astype(itk.D)
     atlas_image_D = atlas_image.astype(itk.D)
     phi_AB, phi_BA = itk_wrapper.register_pair(model, in_image_D, atlas_image_D, finetune_steps=2)

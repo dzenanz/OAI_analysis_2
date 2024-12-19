@@ -39,6 +39,11 @@ class TestOAIAnalysis(unittest.TestCase):
         correct_FC_segmentation = itk.imread(self.data / "colab_case" / "FC_probmap.nii.gz", itk.D)
         correct_TC_segmentation = itk.imread(self.data / "colab_case" / "TC_probmap.nii.gz", itk.D)
 
+        inner_mesh_fc_atlas = mp.read_vtk_mesh(
+            atlases_dir() / "atlas_60_LEFT_baseline_NMI/atlas_FC_inner_mesh_LPS.ply")
+        inner_mesh_tc_atlas = mp.read_vtk_mesh(
+            atlases_dir() / "atlas_60_LEFT_baseline_NMI/atlas_TC_inner_mesh_LPS.ply")
+
         def deform_probmap(phi_AB, image_A, image_B, prob_map):
             interpolator = itk.LinearInterpolateImageFunction.New(image_A)
             warped_image = itk.resample_image_filter(prob_map,
@@ -56,12 +61,18 @@ class TestOAIAnalysis(unittest.TestCase):
         warped_image_FC = deform_probmap(phi_AB, input_image, atlas_image, correct_FC_segmentation)
         warped_image_TC = deform_probmap(phi_AB, input_image, atlas_image, correct_TC_segmentation)
 
-        distance_inner_FC, _ = mp.get_thickness_mesh(warped_image_FC, mesh_type='FC')
-        distance_inner_FC = mp.get_itk_mesh(distance_inner_FC)
+        fc_mesh_itk = mp.get_mesh_from_probability_map(warped_image_FC)
+        fc_mesh = mp.itk_mesh_to_vtk_mesh(fc_mesh_itk)
+        fc_inner_atlas, fc_outer_atlas = mp.get_split_mesh(fc_mesh, inner_mesh_fc_atlas, mesh_type='FC')
+        fc_inner, fc_outer = mp.get_distance(fc_inner_atlas, fc_outer_atlas)
+        distance_inner_FC = mp.get_itk_mesh(fc_inner)
         print(distance_inner_FC)
 
-        distance_inner_TC, _ = mp.get_thickness_mesh(warped_image_TC, mesh_type='TC')
-        distance_inner_TC = mp.get_itk_mesh(distance_inner_TC)
+        tc_mesh_itk = mp.get_mesh_from_probability_map(warped_image_TC)
+        tc_mesh = mp.itk_mesh_to_vtk_mesh(tc_mesh_itk)
+        tc_inner_atlas, tc_outer_atlas = mp.get_split_mesh(tc_mesh, inner_mesh_tc_atlas, mesh_type='TC')
+        tc_inner, tc_outer = mp.get_distance(tc_inner_atlas, tc_outer_atlas)
+        distance_inner_TC = mp.get_itk_mesh(tc_inner)
         print(distance_inner_TC)
 
         print("Thickness computation completed")

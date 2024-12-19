@@ -15,6 +15,7 @@ authors = [
   { name = "Hastings Greer", email = "hastings.greer@gmail.com" },
   { name = "Matt McCormick", email = "matt@mmmccormick.com" },
   { name = "Pranjal Sahu", email = "pranjalsahu5@gmail.com" },
+  { name = "Dženan Zukić", email = "dzenan.zukic@kitware.com" },
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -23,19 +24,24 @@ classifiers = [
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
   "torch",
-  "itk==5.3",
-  "itk-cuberille",
-  "trimesh",
-  "vtk",
-  "icon_registration==1.1.2",
-  "pooch",
-  "scikit-image",
-  "scikit-learn",
+  # "torch==2.4.1+cu124",
+  "itk==5.4.0",
+  "itk-cuberille==2.7.0",
+  "itk-parabolicmorphology==1.3.1",
+  "trimesh==4.4.9",
+  "vtk==9.3.1",
+  "icon_registration==1.1.5",
+  "unigradicon==1.0.3",
+  "pooch==1.8.2",
+  "scikit-image==0.24.0",
+  "scikit-learn==1.5.1",
+  "zarr==2.18.3",
 ]
 
 [project.urls]
@@ -64,7 +70,7 @@ cov = [
 ]
 
 [[tool.hatch.envs.all.matrix]]
-python = ["3.7", "3.8", "3.9", "3.10", "3.11"]
+python = ["3.8", "3.9", "3.10", "3.11", "3.12"]
 
 [tool.hatch.envs.lint]
 detached = true
@@ -90,12 +96,12 @@ all = [
 ]
 
 [tool.black]
-target-version = ["py37"]
+target-version = ["py311"]
 line-length = 120
 skip-string-normalization = true
 
 [tool.ruff]
-target-version = "py37"
+target-version = "py311"
 line-length = 120
 select = [
   "A",

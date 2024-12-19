@@ -11,6 +11,8 @@ Sample usage for thickness computation
 Sample usage for mapping attributes/data to atlas mesh (target mesh)
     mapped_mesh = mp.map_attributes(source_mesh, target_mesh)
 """
+import os
+import tempfile
 
 import numpy as np
 from sklearn.cluster import KMeans
@@ -18,9 +20,32 @@ import itk
 import trimesh
 import vtk
 from vtk.util import numpy_support as ns
+from vtkmodules.vtkCommonCore import reference
+from vtk import vtkPointLocator, vtkKdTreePointLocator
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import normalize
+
 
 # Helper Functions for Mesh Processing
+
+def read_vtk_mesh(filename):
+    if str(filename)[-4:] == ".ply":
+        reader = vtk.vtkPLYReader()
+    else:
+        reader = vtk.vtkPolyDataReader()
+    reader.SetFileName(filename)
+    reader.Update()
+    return reader.GetOutput()
+
+
+def write_vtk_mesh(mesh, filename):
+    writer = vtk.vtkPolyDataWriter()
+    writer.SetFileName(filename)
+    writer.SetInputData(mesh)
+    writer.SetFileVersion(42)  # ITK does not support newer version (5.1)
+    writer.SetFileTypeToBinary()  # reading and writing binary files is faster
+    writer.Write()
+
 
 # Get Centroid of all the cells
 def get_cell_centroid(mesh: itk.Mesh):
@@ -96,6 +121,16 @@ def get_itk_mesh(vtk_mesh):
         itk_mesh.SetPointData(itk.vector_container_from_array(point_data_numpy))
         itk_mesh.SetCellData(itk.vector_container_from_array(cell_data_numpy))
     return itk_mesh
+
+
+def itk_mesh_to_vtk_mesh(itk_mesh, intermediate_filename=None):
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, 'temp.vtk')
+        if intermediate_filename is None:
+            intermediate_filename = path
+        itk.meshwrite(itk_mesh, intermediate_filename, compression=True)
+        vtk_mesh = read_vtk_mesh(intermediate_filename)
+    return vtk_mesh
 
 
 # Get VTK mesh using vertices and faces array
@@ -210,8 +245,8 @@ def split_tibial_cartilage_surface(mesh, mesh_normals, mesh_centroids):
     # transfer 0/1 labels to -1/1 labels
     inner_outer_label_list = labels * 2 - 1
 
-    # set inner surface which contains mostly positive normals
-    if mesh_normals[inner_outer_label_list == -1, 1].mean() < 0:
+    # set inner surface which contains mostly negative normals
+    if mesh_normals[inner_outer_label_list == -1, 2].mean() > 0:
         inner_outer_label_list = -inner_outer_label_list
 
     inner_face_list = np.where(inner_outer_label_list == -1)[0]
@@ -233,7 +268,7 @@ def cluster_and_segment(mesh_centroids_normalized, face_normal_value, dot_output
     labels_upper = labels_upper * 2 - 1
 
     # set inner surface which contains mostly positive normals
-    if face_normal_value[labels_upper == -1, 1].mean() < 0:
+    if face_normal_value[labels_upper == -1, 2].mean() < 0:
         labels_upper = -labels_upper
 
     return labels_upper
@@ -252,24 +287,24 @@ def split_femoral_cartilage_surface(mesh, face_normal, face_centroid, num_divisi
     center = (bbox_min + bbox_max) / 2
 
     inner_outer_label_list = np.zeros(mesh.GetNumberOfCells())  # up:1, down:-1
-    connect_direction = center - face_centroid
+    connect_direction = normalize(center - face_centroid, axis=1, norm='l2')
 
     dot_output = np.multiply(connect_direction, face_normal)
-    x_coord = mesh_centroids_normalized[:, 0]
+    y_coord = mesh_centroids_normalized[:, 1]
 
     # For puting the labels at correct indices for all the segments
     inner_outer_label_list = np.zeros(mesh_centroids_normalized.shape[0])
 
     # For dividing the mesh into smaller segments for better clustering
-    min_x = np.min(mesh_centroids_normalized[:, 0])
-    max_x = np.max(mesh_centroids_normalized[:, 0])
-    step_value = (max_x - min_x) / num_divisions
+    min_y = np.min(mesh_centroids_normalized[:, 1])
+    max_y = np.max(mesh_centroids_normalized[:, 1])
+    step_value = (max_y - min_y) / num_divisions
 
     # Perform clustering for each segment individually
     for i in range(num_divisions):
-        lower_x = min_x + step_value * i
-        upper_x = lower_x + step_value
-        current_indices = np.where((x_coord >= lower_x) & (x_coord < upper_x))[0]
+        lower_y = min_y + step_value * i
+        upper_y = lower_y + step_value
+        current_indices = np.where((y_coord >= lower_y) & (y_coord < upper_y))[0]
 
         mesh_centroids_normalized_extracted = mesh_centroids_normalized[current_indices]
         face_normal_value_extracted = face_normal[current_indices]
@@ -330,7 +365,7 @@ def get_mesh(itk_image, num_iterations=150):
 
     # Obtain the mesh from Probability maps using Marching Cubes
     verts, faces, normals, values = skimage.measure.marching_cubes(
-        img_array, level=0.5, spacing=spacing, step_size=1, gradient_direction="ascent"
+        img_array, level=None, spacing=spacing, step_size=1, gradient_direction="ascent"
     )
 
     mesh = get_vtk_mesh(verts, faces)
@@ -378,21 +413,67 @@ def split_mesh(mesh, mesh_type="FC"):
 
 
 # Obtain the thickness of the input itk_image by creating a mesh and splitting it.
-def get_thickness_mesh(itk_image, mesh_type="FC", num_iterations=150):
+def get_split_mesh(vtk_mesh, atlas_mesh, mesh_type="FC", num_iterations=150, distance_threshold_mm=10.0):
     """
     Takes the probability map obtained from the segmentation algorithm as an itk image.
     Constructs a VTK mesh from it and returns the thickness between the inner and outer splitted mesh.
     Takes as argument the type of mesh 'FC' or 'TC'.
+    atlas_mesh is used for island filtering - we keep islands close to it
     """
-    # Get mesh from itk image
-    mesh = get_mesh(itk_image, num_iterations=150)
+    # Keep the largest 1 (FC) or 2 (TC) regions
+    connect = vtk.vtkPolyDataConnectivityFilter()
+    connect.SetInputData(vtk_mesh)
+    connect.SetExtractionModeToAllRegions()
+    connect.ColorRegionsOn()
+    connect.Update()
+    region_sizes = ns.vtk_to_numpy(connect.GetRegionSizes())
+    sorted_indices = np.argsort(region_sizes)[::-1]
+    # Usual sizes: FC 150k, TC 2x 25k
+
+    # Let's keep all the regions bigger than 10k, and at least 1 for FC and 2 for TC
+    # We also use size as the centroid of a curved cartilage surfaces could be far from atlas mesh
+    indices_to_keep = [sorted_indices[0]]  # The largest region
+
+    region_iterator = 1
+    while region_iterator < len(sorted_indices) and region_sizes[sorted_indices[region_iterator]] > 10000:
+        indices_to_keep.append(sorted_indices[region_iterator])
+        region_iterator += 1
+
+    if mesh_type == "TC" and region_iterator < 2:
+        indices_to_keep.append(sorted_indices[1])  # Second largest region
+        region_iterator += 1
+
+    # now check island centroid's distance to the atlas mesh and keep the close ones
+    cc = connect.GetOutput()
+    region_ids = ns.vtk_to_numpy(cc.GetPointData().GetScalars())
+    vertices = ns.vtk_to_numpy(cc.GetPoints().GetData())
+    locator = vtkPointLocator()
+    locator.SetDataSet(atlas_mesh)
+    locator.BuildLocator()
+    np.set_printoptions(precision=2)
+    while region_iterator < len(sorted_indices):
+        region = sorted_indices[region_iterator]
+        region_vertices = vertices[region_ids == region]
+        region_centroid = np.mean(region_vertices, axis=0)
+        dist2 = reference(-1.0)
+        locator.FindClosestPointWithinRadius(distance_threshold_mm, region_centroid, dist2)
+        if 0 <= dist2 < distance_threshold_mm ** 2:
+            indices_to_keep.append(region)
+        region_iterator += 1
+
+    connect.SetExtractionModeToSpecifiedRegions()
+    for keep in indices_to_keep:
+        connect.AddSpecifiedRegion(keep)
+    connect.Update()
+    cc = connect.GetOutput()
+
+    # Smooth extracted mesh
+    mesh = smooth_mesh(cc, num_iterations=num_iterations)
 
     # Split the mesh into inner and outer
     inner_mesh, outer_mesh = split_mesh(mesh, mesh_type)
 
-    # Get the distance between inner and outer mesh
-    distance_inner, distance_outer = get_distance(inner_mesh, outer_mesh)
-    return distance_inner, distance_outer
+    return inner_mesh, outer_mesh
 
 
 # Map the attributes from the source mesh to target mesh (atlas mesh)
@@ -444,80 +525,54 @@ def compute_least_square_circle(x, y):
     return center_2b, R_2b
 
 
-# For getting the cylinder
-def get_cylinder(vertice):
-    x, y = vertice[:, 0], vertice[:, 1]
-    z_min, z_max = np.min(vertice[:, 2]), np.max(vertice[:, 2])
-    center, r = compute_least_square_circle(x, y)
-    return (center, r), (z_min, z_max)
-
-
 # Project the vertices to the cylinder.
-def get_projection_from_circle_and_vertice(vertice, circle):
-    def equal_scale(input, ref):
-        input = (input - np.min(input)) / (np.max(input) - np.min(input))
-        input = input * (np.max(ref) - np.min(ref)) * 1.5 + np.min(ref)
-        return input
-
+def get_projection_from_circle_and_vertices(vertices, circle):
     center, r = circle
-    x, y = vertice[:, 0], vertice[:, 1]
-    radian = np.arctan2(y - center[1], x - center[0])
+    y, z = vertices[:, 1], vertices[:, 2]
+    radian = np.arctan2(z - center[1], y - center[0])
 
-    embedded = np.zeros([len(vertice), 2])
+    embedded = np.zeros([len(vertices), 2])
     embedded[:, 0] = radian
-    embedded[:, 1] = vertice[:, 2]
+    embedded[:, 1] = vertices[:, 0]
 
-    plot_xy = np.zeros_like(embedded)
-    angle = radian / np.pi * 180
-    angle = equal_scale(angle, vertice[:, 2])
-    plot_xy[:, 0] = angle
-    plot_xy[:, 1] = vertice[:, 2]
-    return embedded, plot_xy
+    plot_yz = np.zeros_like(embedded)
+    angle = (np.pi / 2 - radian) % (2*np.pi)  # shift and wrap around to avoid plotting discontinuity
+    plot_yz[:, 0] = angle * r  # convert from radians to millimeters
+    plot_yz[:, 1] = -vertices[:, 0]
+    return embedded, plot_yz
 
 
 # Projects the thickness in mapped mesh to 2D
 # Takes as arugment the projected points (embedded), if not given then re-uses the
 # already transformed points in the atlas mesh for the given mesh type.
 def project_thickness(mapped_mesh, mesh_type="FC", embedded=None):
-    def do_linear_pca(vertice, dim=3.0):
+    def do_linear_pca(vertex, dim=3):
         from sklearn.decomposition import KernelPCA
 
         kpca = KernelPCA(n_components=2, degree=dim, n_jobs=None)
-        embedded = kpca.fit_transform(vertice)
+        embedded = kpca.fit_transform(vertex)
         return embedded
 
-    def rotate_embedded(embedded, angle):
-        theta = (angle / 180.0) * np.pi
-        rotMatrix = np.array(
-            [[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]]
-        )
-        embedded = c = np.dot(embedded, rotMatrix)
-        return embedded
-
-    point_data = np.array(mapped_mesh.GetPointData().GetScalars())
+    thickness = np.array(mapped_mesh.GetPointData().GetScalars())
 
     if mesh_type == "FC":
         vertices = np.array(mapped_mesh.GetPoints().GetData())
-        vertices[:, [1, 0]] = vertices[:, [0, 1]]
-        circle, z_range = get_cylinder(vertices)
-        embedded, plot_xy = get_projection_from_circle_and_vertice(vertices, circle)
+        circle = compute_least_square_circle(vertices[:, 1], vertices[:, 2])
+        embedded, plot_yz = get_projection_from_circle_and_vertices(vertices, circle)
 
-        return embedded[:, 0], embedded[:, 1], point_data
+        return plot_yz[:, 0], plot_yz[:, 1], thickness
     else:
-        vertice = np.array(mapped_mesh.GetPoints().GetData())
-        thickness = np.array(mapped_mesh.GetPointData().GetScalars())
+        vertices = np.array(mapped_mesh.GetPoints().GetData())
+        # thickness = np.array(mapped_mesh.GetPointData().GetScalars())
 
-        vertice_left = vertice[vertice[:, 2] < 50]
-        index_left = np.where(vertice[:, 2] < 50)[0]
+        vertice_left = vertices[vertices[:, 0] < -50]
+        index_left = np.where(vertices[:, 0] < -50)[0]
 
-        vertice_right = vertice[vertice[:, 2] >= 50]
-        index_right = np.where(vertice[:, 2] >= 50)[0]
+        vertice_right = vertices[vertices[:, 0] >= -50]
+        index_right = np.where(vertices[:, 0] >= -50)[0]
 
         embedded_left = do_linear_pca(vertice_left)
         embedded_right = do_linear_pca(vertice_right)
-
-        embedded_left = rotate_embedded(embedded_left, -50)
-        embedded_right = rotate_embedded(embedded_right, -160)
 
         embedded_right[:, 0] = -embedded_right[:, 0]  # flip x
 

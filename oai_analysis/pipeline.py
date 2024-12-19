@@ -17,14 +17,6 @@ from thickness_computation import compute_thickness
 DATA_DIR = pathlib.Path(__file__).parent / "data"
 
 
-def write_vtk_mesh(mesh, filename):
-    writer = vtk.vtkPolyDataWriter()
-    writer.SetFileName(filename)
-    writer.SetInputData(mesh)
-    writer.SetFileVersion(42)  # ITK does not support newer version (5.1)
-    writer.SetFileTypeToBinary()  # reading and writing binary files is faster
-    writer.Write()
-
 
 def transform_mesh(mesh, transform, filename_prefix, keep_intermediate_outputs):
     """
@@ -44,7 +36,7 @@ def transform_mesh(mesh, transform, filename_prefix, keep_intermediate_outputs):
     transformed_mesh.GetPointData().AddArray(mesh.GetPointData().GetArray(0))  # transfer thickness
 
     if keep_intermediate_outputs:
-        write_vtk_mesh(mesh, filename_prefix + "_original.vtk")
+        mp.write_vtk_mesh(mesh, filename_prefix + "_original.vtk")
     else:
         os.remove(filename_prefix + "_transformed.vtk")
 
@@ -159,8 +151,8 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
     fc_mesh = mp.itk_mesh_to_vtk_mesh(fc_mesh_itk)
     tc_mesh = mp.itk_mesh_to_vtk_mesh(tc_mesh_itk)
     if keep_intermediate_outputs:
-        write_vtk_mesh(fc_mesh, output_path + "/FC_mesh_patient.vtk")
-        write_vtk_mesh(tc_mesh, output_path + "/TC_mesh_patient.vtk")
+        mp.write_vtk_mesh(fc_mesh, output_path + "/FC_mesh_patient.vtk")
+        mp.write_vtk_mesh(tc_mesh, output_path + "/TC_mesh_patient.vtk")
 
     thickness_via_mesh_splitting = True
     if thickness_via_mesh_splitting:
@@ -179,8 +171,8 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
         fc_inner, fc_mesh = mp.get_distance(fc_inner_patient, fc_outer_patient)
         tc_inner, tc_mesh = mp.get_distance(tc_inner_patient, tc_outer_patient)
         if keep_intermediate_outputs:
-            write_vtk_mesh(fc_inner, output_path + "/FC_inner.vtk")
-            write_vtk_mesh(tc_inner, output_path + "/TC_inner.vtk")
+            mp.write_vtk_mesh(fc_inner, output_path + "/FC_inner.vtk")
+            mp.write_vtk_mesh(tc_inner, output_path + "/TC_inner.vtk")
     else:
         print("Computing the thickness map via distance transformation from mask edges")
         fc_thickness_image, fc_distance, fc_mask = compute_thickness(FC_prob)
@@ -192,22 +184,22 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
             itk.imwrite(tc_thickness_image, os.path.join(output_path, "TC_thickness_image.nrrd"), compression=True)
 
     if keep_intermediate_outputs:
-        write_vtk_mesh(fc_mesh, output_path + "/FC_outer.vtk")
-        write_vtk_mesh(tc_mesh, output_path + "/TC_outer.vtk")
+        mp.write_vtk_mesh(fc_mesh, output_path + "/FC_outer.vtk")
+        mp.write_vtk_mesh(tc_mesh, output_path + "/TC_outer.vtk")
 
     print("Transforming meshes into atlas space")
     fc_mesh_atlas = transform_mesh(fc_mesh, phi_BA, output_path + "/FC_mesh", False)
     tc_mesh_atlas = transform_mesh(tc_mesh, phi_BA, output_path + "/TC_mesh", False)
     if keep_intermediate_outputs:
-        write_vtk_mesh(fc_mesh_atlas, output_path + "/FC_mesh_atlas.vtk")
-        write_vtk_mesh(tc_mesh_atlas, output_path + "/TC_mesh_atlas.vtk")
+        mp.write_vtk_mesh(fc_mesh_atlas, output_path + "/FC_mesh_atlas.vtk")
+        mp.write_vtk_mesh(tc_mesh_atlas, output_path + "/TC_mesh_atlas.vtk")
 
     print("Mapping thickness from patient meshes to the atlas")
     mapped_mesh_fc = mp.map_attributes(fc_mesh_atlas, inner_mesh_fc_atlas)
     mapped_mesh_tc = mp.map_attributes(tc_mesh_atlas, inner_mesh_tc_atlas)
     if keep_intermediate_outputs:
-        write_vtk_mesh(mapped_mesh_fc, output_path + "/FC_mapped_mesh.vtk")
-        write_vtk_mesh(mapped_mesh_tc, output_path + "/TC_mapped_mesh.vtk")
+        mp.write_vtk_mesh(mapped_mesh_fc, output_path + "/FC_mapped_mesh.vtk")
+        mp.write_vtk_mesh(mapped_mesh_tc, output_path + "/TC_mapped_mesh.vtk")
 
     print("Projecting thickness to 2D")
     thickness_3d_to_2d(mapped_mesh_fc, mesh_type='FC', output_filename=output_path + '/FC_thickness')

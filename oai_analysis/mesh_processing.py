@@ -25,8 +25,6 @@ from vtk import vtkPointLocator, vtkKdTreePointLocator
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import normalize
 
-from oai_analysis.pipeline import write_vtk_mesh
-
 
 # Helper Functions for Mesh Processing
 
@@ -38,6 +36,15 @@ def read_vtk_mesh(filename):
     reader.SetFileName(filename)
     reader.Update()
     return reader.GetOutput()
+
+
+def write_vtk_mesh(mesh, filename):
+    writer = vtk.vtkPolyDataWriter()
+    writer.SetFileName(filename)
+    writer.SetInputData(mesh)
+    writer.SetFileVersion(42)  # ITK does not support newer version (5.1)
+    writer.SetFileTypeToBinary()  # reading and writing binary files is faster
+    writer.Write()
 
 
 # Get Centroid of all the cells

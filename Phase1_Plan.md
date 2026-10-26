@@ -30,16 +30,16 @@ Bea's notes list what stakeholders need from the whole project. Most of it lands
 
 | Bea's item | Phase 1 takes | Plan section |
 |---|---|---|
-| **Aim 4.1:** DataLad provenance-tracked repository | Project folders that can be DataLad datasets (optional `--datalad`). The pipeline's own provenance doesn't depend on DataLad. | 4.9 |
+| **Aim 4.1:** DataLad provenance-tracked repository | **Not Phase 1** (Q7). The pipeline's own provenance and the raw-input references in `case.json` stand on their own; DataLad can be layered on later. | 7 |
 | **Aim 4.2:** Parquet + OME-NGFF formats | A project-level **Parquet** index of case status, QC metrics and scalar biomarkers. An IO layer where an OME-NGFF writer can be added; OME-Zarr output is optional. | 4.6, 4.7 |
 | **Aim 4.3:** web visualization app | Nothing to build yet. Outputs are kept web-friendly (Parquet, PNG thumbnails, `.vtk`/`.vtp` meshes) so the app can consume them later. | 7 |
 | Plain-language status: Running / Succeeded / Failed / Needs Review | Adopted as the status vocabulary of `oai-analysis status` and the Parquet index. | 4.6 |
 | Human-readable logs, per-case status, searchable failures | A plain-English run summary, per-stage status, and `status --failed-at STAGE` filters. | 4.6 |
 | Provenance (code version, weights, params) and data lineage to raw inputs | Already in the plan. Adds OAI identifiers (patient, study UID, series UID) and a raw-input hash, so lineage survives if access to the source data is later restricted. | 4.6 |
-| Automated sanity checks at each stage; "needs human review" flags | A `check()` hook on every stage, with basic checks shipped for the default stages. | 4.10 |
-| Uncertainty / confidence indicators | One cheap metric from the segmentation probabilities (mean uncertainty inside the cartilage), recorded as a QC value. | 4.10 |
+| Automated sanity checks at each stage; "needs human review" flags | A `check()` hook on every stage, with basic checks shipped for the default stages. | 4.9 |
+| Uncertainty / confidence indicators | One cheap metric from the segmentation probabilities (mean uncertainty inside the cartilage), recorded as a QC value. | 4.9 |
 | Regression comparison against known-good runs | Step 0's comparison tool becomes `oai-analysis compare` and works on any two projects. | Step 0, 6 |
-| Visual outputs by default; per-run/per-subject exportable summary | Per-case thumbnails, plus a CSV export of `status`. The static HTML report is **Phase 2** (Q8). | 4.6, 4.10 |
+| Visual outputs by default; per-run/per-subject exportable summary | Per-case thumbnails, plus a CSV export of `status`. The static HTML report is **Phase 2** (Q8). | 4.6, 4.9 |
 | Audit trail of who approved/rejected cases; escalation path | **Phase 2** (Q8), together with the report and dashboard. | 7 |
 | Small-batch / rerun only failed or changed cases; checkpointing | Already in the plan (resume, staleness). Adds `--failed` and `--stale` selectors. | 4.6 |
 | Resource-aware scheduling; runs must not stall silently | A device check at start, per-stage timing in provenance, and a heartbeat in the run log. Real scheduling stays in the orchestrator. | 4.6 |
@@ -47,7 +47,7 @@ Bea's notes list what stakeholders need from the whole project. Most of it lands
 | Plain-language change log, "what might look different" | A `CHANGELOG.md` with a reviewer-facing section per release, backed by `compare` results. | Step 7 |
 | Batching is hard inside Dagster jobs; risk of Dagster lock-in | Batching lives in the library (`run_cases`), so an orchestrator only hands it a list of cases. There is no orchestrator logic in the package. | 3, 4.4 |
 | No-code dashboard, overlay viewers, comparison sliders, aggregate trend dashboards | **Not Phase 1.** These are Phase 2/3, and they build on the Parquet index and the review records. | 7 |
-| Harmonization across cohorts (MOST, JoCo, UK Biobank; ComBat, cycle-GANs) | **Not Phase 1.** The `Preprocessor` interface is where harmonizers will plug in. Its checks catch the single-dataset problems already seen: intensity normalization (Dec 4) and orientation/origin metadata (Nov 20). | 4.10, 7 |
+| Harmonization across cohorts (MOST, JoCo, UK Biobank; ComBat, cycle-GANs) | **Not Phase 1.** The `Preprocessor` interface is where harmonizers will plug in. Its checks catch the single-dataset problems already seen: intensity normalization (Dec 4) and orientation/origin metadata (Nov 20). | 4.9, 7 |
 
 ---
 
@@ -188,7 +188,7 @@ class Stage(ABC):
         """Load heavy resources (networks, weights) once per process. Default: nothing."""
 
     def check(self, outputs: dict, case: "CaseInfo") -> list["QCFinding"]:
-        """Sanity-check this stage's outputs (see 4.10). Default: no findings."""
+        """Sanity-check this stage's outputs (see 4.9). Default: no findings."""
         return []
 
 
@@ -535,16 +535,7 @@ All file writing goes through `io.py` writers chosen by artifact type. That keep
 - **Determinism.** The runner sets and records seeds (torch, numpy; KMeans already uses `random_state=5`). An optional `deterministic: true` setting turns on deterministic torch/cuDNN algorithms. It will be slower, and Step 0 measures how much noise remains (uniGradICON fine-tuning).
 - **Check:** `pip install .` (non-editable) into a fresh venv, then run the bundled case from a different directory.
 
-### 4.9 DataLad compatibility (Aim 4.1)
-
-The grant promises a DataLad, git-based, provenance-tracked OA analysis repository. Phase 1 makes a project folder a valid DataLad dataset without making DataLad a requirement:
-
-- `oai-analysis init PROJECT --datalad` runs `datalad create`, and keeps `project.yaml`, `cases.csv`, the `provenance.json` files and `index.parquet` in git. Large binaries go to git-annex (`.gitattributes` rules by file extension).
-- After each case finishes, the runner calls `datalad save -m "<case_id>: Succeeded (oai-analysis 2.1.0…)"`. Saving per case instead of per stage keeps the git history manageable at cohort scale.
-- Raw OAI inputs are **referenced** (path, UIDs, hash in `case.json`), never copied into the dataset. This respects the OAI data-use terms and still links each output to its raw input.
-- Without `--datalad`, everything else works the same. The pipeline's own `provenance.json` remains the source of truth.
-
-### 4.10 Sanity checks and review flags
+### 4.9 Sanity checks and review flags
 
 **Stage checks.** After a stage succeeds, the runner calls its `check()` method. A finding is either `fail` (stop this case) or `review` (continue, mark the case *Needs Review*). Findings are stored in `provenance.json` and `index.parquet`. The default stages ship these checks, with thresholds in the config:
 
@@ -653,12 +644,11 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
 - Add `provenance.py`: hashing, environment and version capture, weight hashes and failure records.
 - Storage formats and retention (4.7).
 - Plain-language statuses, `index.parquet`, the run summary, the device check and heartbeat, and the `--failed`/`--stale`/`--failed-at` selectors.
-- Optional DataLad mode (4.9).
-- Done when: on a 12-case project, killing the run midway and rerunning resumes where it stopped. Changing one parameter reruns only the affected stages. The cuberille-crash case ends as *Failed* without stopping the batch. `oai-analysis status` matches the folder contents. With `--datalad`, `datalad status` is clean after the run.
+- Done when: on a 12-case project, killing the run midway and rerunning resumes where it stopped. Changing one parameter reruns only the affected stages. The cuberille-crash case ends as *Failed* without stopping the batch. `oai-analysis status` matches the folder contents.
 
 ### Step 4b: Sanity checks and thumbnails
 
-- `check()` on the default stages (4.10), `QCFinding`, the *Needs Review* status, and per-case thumbnails.
+- `check()` on the default stages (4.9), `QCFinding`, the *Needs Review* status, and per-case thumbnails.
 - Tune the thresholds on the benchmark cases, using the Dec 18 triage as a reference: the Group 3 cases should come out *Needs Review* and the clean cases should not.
 - Done when: `oai-analysis status` for the 12-case project shows the expected Succeeded / Needs Review / Failed split, and every flag has a plain-English message.
 
@@ -698,6 +688,7 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
 - **1D descriptors, outlier flagging and the QC dashboard** belong to Phase 2. The `BiomarkerExtractor` slot and the project layout are designed so they plug in.
 - **Interactive UI** (Bea's no-code dashboard, triggering reruns from a browser, overlay viewers, comparison sliders, aggregate trend dashboards) and the **Aim 4.3 web app** (BIG-KP, itk-wasm, vtk.js) belong to Phases 2–3. Phase 1 supplies their data: `index.parquet`, the QC findings, thumbnails and atlas-space meshes.
 - **The static HTML report and the review records** (audit trail, accept/reject/flag) move to Phase 2 (Q8).
+- **DataLad (Aim 4.1)** in any form (Q7). Nothing in Phase 1 creates, saves to or tests against a DataLad dataset.
 - **OME-NGFF as the default image format.** The writer slot exists, but switching formats waits until a viewer needs it.
 - **Cross-cohort harmonization** (MOST, JoCo, UK Biobank; ComBat, cycle-GANs, mm-DeepAtlas).
 - **Batching inside Dagster itself.** Phase 1 gives Dagster `run_cases()`; changing knee-sarg to use it is a later step.
@@ -715,6 +706,6 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
 | Q4 | Is `requires-python >= 3.10` acceptable? knee-sarg's README still says 3.8, but venv11 is 3.11. | **Decided: 3.11 or newer.** Older versions are deprecated. |
 | Q5 | Docs tooling: MkDocs (Material + mkdocstrings), or plain Markdown in `docs/`? | **Decided: plain Markdown**, the simpler choice. |
 | Q6 | Is it OK for the *new* project layout to use different file formats (`.h5` transforms, `.nii.gz` images), while the legacy CLI keeps today's? | Yes. That is the biggest storage saving. |
-| Q7 | Should DataLad be optional (`--datalad`) or required in Phase 1? | **Decided: optional** in Phase 1. |
-| Q8 | Do the static HTML report and the review records (4.10) belong in Phase 1, or should they move to Phase 2 with the dashboard? | **Decided: Phase 2.** Phase 1 keeps the per-stage checks and thumbnails. |
+| Q7 | Should DataLad be optional (`--datalad`) or required in Phase 1? | **Decided: neither.** DataLad is not part of Phase 1 at all. |
+| Q8 | Do the static HTML report and the review records (4.9) belong in Phase 1, or should they move to Phase 2 with the dashboard? | **Decided: Phase 2.** Phase 1 keeps the per-stage checks and thumbnails. |
 | Q9 | Container recipe: Docker (from knee-sarg's Dockerfile), or a pixi environment like knee-sarg uses? | **Decided: Docker.** |

@@ -1,10 +1,11 @@
 # Phase 1 plan: library-ification + modular architecture
 
-Status: **approved** (Q1–Q3 and Q6 as recommended; Q4 and Q5 decided differently, see section 8). Step 0 in progress.
+Status: **approved** (Q1–Q3 and Q6 as recommended; Q4 and Q5 decided differently; Q7–Q9 still open, see section 8). Step 0 in progress.
 
 Sources reviewed:
 - *OAI Roadmap 2026-29* (Google Doc): Phase 1 goals and milestones M1.1–M1.4.
 - *Notes - OAI pipeline.docx*: meetings from Nov 6 to Dec 18, 2024, including the open action items.
+- *Bea's Notes - proposal main points.docx*: the grant's Aim 4 (DataLad repository, Parquet/OME-NGFF formats, web app), a stakeholder wish list (accessibility, logging, QC, scale, reproducibility, reporting, trust), and a barrier analysis.
 - `OAI_analysis_2` at `f198a2f` (local `main`, 2 commits ahead of `origin/main`).
 - `OAI_analysis` (the older pipeline), `knee-sarg` (the Dagster orchestration), `OAI_results_Marc`, the `OAI_results_2*` and `OAI_results_old` folders, `NAS`, and the top level of `O:\OAI`.
 
@@ -22,6 +23,31 @@ Sources reviewed:
 | **M1.4** | Documentation for the Kitware → UCSD handoff. |
 
 Dagster (knee-sarg) is explicitly *above* this layer. It stays optional, and Phase 1 must not break it.
+
+### 1.1 What Bea's notes add
+
+Bea's notes list what stakeholders need from the whole project. Most of it lands in Phases 2–3, but several items are cheap *only if the Phase 1 architecture is designed for them*: status vocabulary, sanity-check hooks, data formats and lineage. Phase 1 therefore takes the items below. Where they show up in the plan is in the last column.
+
+| Bea's item | Phase 1 takes | Plan section |
+|---|---|---|
+| **Aim 4.1:** DataLad provenance-tracked repository | Project folders that can be DataLad datasets (optional `--datalad`). The pipeline's own provenance doesn't depend on DataLad. | 4.9 |
+| **Aim 4.2:** Parquet + OME-NGFF formats | A project-level **Parquet** index of case status, QC metrics and scalar biomarkers. An IO layer where an OME-NGFF writer can be added; OME-Zarr output is optional. | 4.6, 4.7 |
+| **Aim 4.3:** web visualization app | Nothing to build yet. Outputs are kept web-friendly (Parquet, PNG thumbnails, `.vtk`/`.vtp` meshes) so the app can consume them later. | 7 |
+| Plain-language status: Running / Succeeded / Failed / Needs Review | Adopted as the status vocabulary of `oai-analysis status` and the Parquet index. | 4.6 |
+| Human-readable logs, per-case status, searchable failures | A plain-English run summary, per-stage status, and `status --failed-at STAGE` filters. | 4.6 |
+| Provenance (code version, weights, params) and data lineage to raw inputs | Already in the plan. Adds OAI identifiers (patient, study UID, series UID) and a raw-input hash, so lineage survives if access to the source data is later restricted. | 4.6 |
+| Automated sanity checks at each stage; "needs human review" flags | A `check()` hook on every stage, with basic checks shipped for the default stages. | 4.10 |
+| Uncertainty / confidence indicators | One cheap metric from the segmentation probabilities (mean uncertainty inside the cartilage), recorded as a QC value. | 4.10 |
+| Regression comparison against known-good runs | Step 0's comparison tool becomes `oai-analysis compare` and works on any two projects. | Step 0, 6 |
+| Visual outputs by default; per-run/per-subject exportable summary | Per-case thumbnails, and a static HTML project report (`oai-analysis report`) with CSV export. | 4.10 |
+| Audit trail of who approved/rejected cases; escalation path | A per-case `review.jsonl` record and `oai-analysis review CASE --accept/--reject/--flag "note"`. No UI yet. | 4.10 |
+| Small-batch / rerun only failed or changed cases; checkpointing | Already in the plan (resume, staleness). Adds `--failed` and `--stale` selectors. | 4.6 |
+| Resource-aware scheduling; runs must not stall silently | A device check at start, per-stage timing in provenance, and a heartbeat in the run log. Real scheduling stays in the orchestrator. | 4.6 |
+| Determinism, environment pinning, containers | Seeds set and recorded, an optional deterministic mode, a lock file, and a container recipe. | 4.8 |
+| Plain-language change log, "what might look different" | A `CHANGELOG.md` with a reviewer-facing section per release, backed by `compare` results. | Step 7 |
+| Batching is hard inside Dagster jobs; risk of Dagster lock-in | Batching lives in the library (`run_cases`), so an orchestrator only hands it a list of cases. There is no orchestrator logic in the package. | 3, 4.4 |
+| No-code dashboard, overlay viewers, comparison sliders, aggregate trend dashboards | **Not Phase 1.** These are Phase 2/3, and they build on the Parquet index and the review records. | 7 |
+| Harmonization across cohorts (MOST, JoCo, UK Biobank; ComBat, cycle-GANs) | **Not Phase 1.** The `Preprocessor` interface is where harmonizers will plug in. Its checks catch the single-dataset problems already seen: intensity normalization (Dec 4) and orientation/origin metadata (Nov 20). | 4.10, 7 |
 
 ---
 
@@ -70,6 +96,8 @@ The pipeline works: the Dec 2024 fixes are in, and a 1-case sanity run with upda
 3. **Keep the legacy entry points working.** `pipeline_cli.py IMAGE OUT laterality` and `analysis_pipeline(...)` keep their behavior and flat output layout, so knee-sarg needs no changes.
 4. **Headless and scriptable first**, per the GDoc: the user is a data scientist, not a clinician.
 5. **Provenance is part of the design.** The runner writes it, not each stage, so plugins get it for free.
+6. **No orchestrator inside the library.** Dagster, SLURM or a plain loop all call the same `OAPipeline.run_cases()`. Batching, resume and provenance live in the library. That removes the Dagster batching problem and the lock-in risk Bea's notes point out.
+7. **Statuses a reviewer can read.** Every status, QC flag and log summary is written so a non-engineer can act on it.
 
 ---
 
@@ -158,6 +186,10 @@ class Stage(ABC):
 
     def setup(self, device: str) -> None:
         """Load heavy resources (networks, weights) once per process. Default: nothing."""
+
+    def check(self, outputs: dict, case: "CaseInfo") -> list["QCFinding"]:
+        """Sanity-check this stage's outputs (see 4.10). Default: no findings."""
+        return []
 
 
 class Preprocessor(Stage):
@@ -313,6 +345,8 @@ pipeline = OAPipeline.from_config("project.yaml")
 
 `OAPipeline` holds the fixed stage order, so stages cannot be accidentally swapped. It calls `setup()` once on every stage before the first case, and it delegates saving, provenance and resume to `Project` (4.6).
 
+To process several cases, `pipeline.run_cases(project, case_ids)` loads the models once and works through the list. This is the single entry point for every orchestrator: the CLI, a notebook loop, a Dagster asset that receives a batch of partition keys, or a SLURM array job that receives a slice of `cases.csv`.
+
 ### 4.5 Plugins and user code (the GDoc's `OAPipeline(biomarker_extractor=statisticalAnalysis)`)
 
 There are three ways to plug in, from least to most formal:
@@ -357,11 +391,16 @@ M:/OAI_projects/pilot/
   project.yaml                 # pipeline config + data roots + retention policy
   cases.csv                    # manifest: case_id, patient_id, month, laterality, input
   runs.jsonl                   # append-only: one line per `oai-analysis run` invocation
-  logs/2026-11-03T140311.log
+  index.parquet                # one row per case: status, failed stage, QC flags/metrics, scalar biomarkers
+  report/index.html            # static report (4.10), regenerated by `oai-analysis report`
+  logs/2026-11-03T140311.log          # engineering log (DEBUG)
+  logs/2026-11-03T140311.summary.txt  # plain-English run summary
   cases/
     9016304/
       96M_LEFT/
-        case.json              # CaseInfo: input path, laterality, DICOM series description, ...
+        case.json              # CaseInfo: input path + raw-input hash, laterality, OAI patient/study/series UIDs, ...
+        review.jsonl           # append-only reviewer decisions (4.10)
+        thumbnails/            # segmentation overlay + 2D maps, small PNGs
         01_preprocess/   image.nii.gz                         provenance.json
         02_segment/      FC_prob.nii.gz  TC_prob.nii.gz        provenance.json
         03_register/     phi_AB.h5  phi_BA.h5                  provenance.json
@@ -403,7 +442,8 @@ oai-analysis init M:/OAI_projects/pilot --data-root O:/OAI ^
   "software": {"oai_analysis": "2.1.0.dev14+gf198a2f", "git_dirty": false,
                "python": "3.11.x", "torch": "2.14.0+cu132", "itk": "5.4.7", "vtk": "9.7.1",
                "icon_registration": "1.1.8", "unigradicon": "1.0.5"},
-  "environment": {"host": "…", "device": "cuda:0", "gpu": "…"},
+  "environment": {"host": "…", "device": "cuda:0", "gpu": "…", "seed": 0, "deterministic": false},
+  "qc": [],
   "started": "2026-11-03T14:03:11-05:00",
   "finished": "2026-11-03T14:08:02-05:00",
   "duration_s": 291.4
@@ -414,19 +454,41 @@ oai-analysis init M:/OAI_projects/pilot --data-root O:/OAI ^
 
 **Status and resume:**
 
+Statuses use the plain-language words from Bea's notes: **Succeeded**, **Needs Review** (succeeded, but a QC check flagged it), **Failed**, **Running**, **Outdated** (the config changed since the run) and **Not started**.
+
 ```
 > oai-analysis status M:/OAI_projects/pilot
-12 cases: 9 complete, 1 failed, 1 stale, 1 not started
+12 cases: 8 Succeeded, 1 Needs Review, 1 Failed, 1 Outdated, 1 Not started
 
-case                 prep  seg  reg  mesh  thick  atlas  bio
-9016304_00M_LEFT      ✓     ✓    ✓    ✓     ✓      ✓      ✓
-9135902_00M_LEFT      ✓     ✓    ✓    ✗ CuberilleError (logs/2026-11-03T140311.log:812)
-9040390_96M_LEFT      ✓     ✓    ~ stale: registerer.finetune_steps 2 -> 5
-9094865_96M_RIGHT     ·
+case                 status         prep seg reg mesh thick atlas bio  note
+9016304_00M_LEFT     Succeeded       ✓    ✓   ✓   ✓    ✓     ✓     ✓
+9103365_96M_RIGHT    Needs Review    ✓    ✓   ✓   ✓    !     ✓     ✓   TC thickness > 6 mm on 3% of vertices
+9135902_00M_LEFT     Failed          ✓    ✓   ✓   ✗                     Mesh generation crashed (CuberilleError)
+9040390_96M_LEFT     Outdated        ✓    ✓   ~                         registerer.finetune_steps changed 2 -> 5
+9094865_96M_RIGHT    Not started
 
-> oai-analysis run M:/OAI_projects/pilot            # resumes: skips ✓, reruns ~ and ✗, starts ·
+> oai-analysis status M:/OAI_projects/pilot --failed-at mesh       # "all cases that failed at step X"
+> oai-analysis status M:/OAI_projects/pilot --needs-review --csv flagged.csv
+> oai-analysis run M:/OAI_projects/pilot                          # resume: skips Succeeded, redoes the rest
+> oai-analysis run M:/OAI_projects/pilot --failed                 # small batch: only Failed cases
 > oai-analysis run M:/OAI_projects/pilot --cases 9135902_00M_LEFT --from mesh
 ```
+
+The same table is written to `index.parquet` after every case, so pandas, DuckDB or a later dashboard can filter it without parsing logs.
+
+**Plain-English run summary** (`logs/*.summary.txt`), written as the run progresses:
+
+```
+Run started 2026-11-03 14:03 on <host> (GPU: <name>), oai-analysis 2.1.0.dev14+gf198a2f, config project.yaml
+12 cases selected (11 to do, 1 already done).
+[14:09] 9016304_00M_LEFT   Succeeded in 5m51s.
+[14:15] 9135902_00M_LEFT   Failed at "mesh generation": the cuberille filter crashed. Earlier steps are kept; rerun with --cases 9135902_00M_LEFT --from mesh.
+[14:21] 9103365_96M_RIGHT  Needs Review: tibial cartilage thickness above 6 mm on 3% of the surface.
+...
+Run finished 15:12: 9 Succeeded, 1 Needs Review, 1 Failed. Details: logs/2026-11-03T140311.log
+```
+
+The runner also checks at startup that the requested device is available. It refuses to fall back to CPU silently, unlike today's warning in `AnalysisObject`. It writes a heartbeat line every few minutes during long GPU stages, so a stalled run is visible.
 
 `Project.status()` and `Project.case(case_id).artifacts` are the same thing as a Python API, for notebooks.
 
@@ -461,6 +523,8 @@ ITK's `imwrite` takes a `compression_level`, `.npy` arrays become compressed `.n
 
 Provenance records the hashes of deleted intermediates, so lineage survives pruning. The legacy CLI keeps its exact current filenames and formats.
 
+All file writing goes through `io.py` writers chosen by artifact type. That keeps Aim 4.2 open: an **OME-NGFF (OME-Zarr)** image writer can be added as another `image_format` option (`zarr` is already a dependency) without touching any stage. Scalar results (status, QC metrics, per-case biomarker summaries) go to **Parquet** from the start (adds a `pyarrow` dependency).
+
 ### 4.8 Packaging and data (M1.1)
 
 - **Distribution name.** Keep `oai-analysis` / `import oai_analysis`; it already exists on PyPI and knee-sarg depends on it (see Q1).
@@ -469,7 +533,52 @@ Provenance records the hashes of deleted intermediates, so lineage survives prun
 - **Data and weights.** All data and weights come from a pooch-managed **user cache** (`OAI_ANALYSIS_DATA` env var override) with sha256 checks. Nothing is written into the package or the CWD. Atlas files are loaded once through `Atlas.default()`.
 - **Console script.** `oai-analysis` (`run`, `init`, `status`, `compare`, `config dump`).
 - **License.** Fix `pyproject.toml` to Apache-2.0 to match `LICENSE`.
+- **Reproducible environment.** A lock file for the full stack, and a container recipe (Dockerfile with CUDA torch; knee-sarg already has one to start from). Provenance records the container image digest when it runs in one.
+- **Determinism.** The runner sets and records seeds (torch, numpy; KMeans already uses `random_state=5`). An optional `deterministic: true` setting turns on deterministic torch/cuDNN algorithms. It will be slower, and Step 0 measures how much noise remains (uniGradICON fine-tuning).
 - **Check:** `pip install .` (non-editable) into a fresh venv, then run the bundled case from a different directory.
+
+### 4.9 DataLad compatibility (Aim 4.1)
+
+The grant promises a DataLad, git-based, provenance-tracked OA analysis repository. Phase 1 makes a project folder a valid DataLad dataset without making DataLad a requirement:
+
+- `oai-analysis init PROJECT --datalad` runs `datalad create`, and keeps `project.yaml`, `cases.csv`, the `provenance.json` files and `index.parquet` in git. Large binaries go to git-annex (`.gitattributes` rules by file extension).
+- After each case finishes, the runner calls `datalad save -m "<case_id>: Succeeded (oai-analysis 2.1.0…)"`. Saving per case instead of per stage keeps the git history manageable at cohort scale.
+- Raw OAI inputs are **referenced** (path, UIDs, hash in `case.json`), never copied into the dataset. This respects the OAI data-use terms and still links each output to its raw input.
+- Without `--datalad`, everything else works the same. The pipeline's own `provenance.json` remains the source of truth.
+
+### 4.10 Sanity checks, review flags and the report
+
+**Stage checks.** After a stage succeeds, the runner calls its `check()` method. A finding is either `fail` (stop this case) or `review` (continue, mark the case *Needs Review*). Findings are stored in `provenance.json` and `index.parquet`. The default stages ship these checks, with thresholds in the config:
+
+| Stage | Check | Why (from the notes) |
+|---|---|---|
+| Preprocess | orientation is the expected one after reorientation; spacing and size are in the normal OAI DESS range; intensity percentiles are recorded | Nov 20 orientation/origin question, Dec 4 normalization bug |
+| Segment | each structure is non-empty; its volume is within a plausible range; the number of connected components; **mean uncertainty** inside the cartilage (from the probabilities) | Nov 6 segmentation failures; Bea's "confidence indicator" |
+| Register | Jacobian determinant > 0 everywhere (no folding); similarity to the atlas after warping | 9040390 registration imperfection |
+| Mesh | non-empty; island count after filtering; self-intersections (VTK collision check) | cuberille crash, self-intersection in 9021791 (PR80) |
+| Thickness | thickness range, and the fraction of vertices above N mm or at exactly 0 | "zeroes around edges" |
+| Biomarkers | NaN fraction of the 2D map | holes in the 2D projection |
+
+```python
+@dataclass
+class QCFinding:
+    severity: Literal["review", "fail"]
+    code: str          # machine-readable, e.g. "thickness.too_thick"
+    message: str       # plain English, shown in status, summary and report
+    value: float | None = None
+```
+
+These are deliberately simple per-case checks. Statistical outlier detection across the cohort (z-scores over descriptors) is Phase 2 and will reuse the same `QCFinding` records and Parquet index.
+
+**Review records (audit trail and escalation path).** `oai-analysis review 9103365_96M_RIGHT --reject --note "TC dent, see slice 87"` appends `{who, when, decision, note, pipeline version}` to the case's `review.jsonl` and updates `index.parquet`. Reviewers who don't use the terminal get the same function later from the Phase 2/3 dashboard. Phase 1 defines the record format.
+
+**Report.** `oai-analysis report PROJECT` writes a static `report/index.html`:
+- totals in plain language ("9 of 12 succeeded, 1 needs review, 1 failed at mesh generation")
+- the most common failure stages
+- one row per case with status, notes and thumbnails (a segmentation overlay on the middle slice, plus the FC/TC 2D thickness maps)
+- a CSV export
+
+It needs no server and opens from a shared drive. It is the stakeholder-facing "visual outputs by default" piece for Phase 1, not the Phase 3 dashboard.
 
 ---
 
@@ -505,6 +614,7 @@ The refactor needs a reference before anything moves.
   It prints a pass/fail table with tolerances.
 - Run current `main` (`f198a2f`, venv11) on the **12 cases** in `pipeline.py:__main__` from `O:\OAI` plus the `colab_case`, **twice**. The two runs measure GPU run-to-run noise (uniGradICON fine-tuning is not deterministic), which sets the tolerances. Store the result as `M:\Dev\Osteoarthritis\OAI_golden_f198a2f\` (outside git) along with timings.
 - Done when: one command regenerates outputs and prints a comparison against the golden set.
+- In Step 4 this tool becomes `oai-analysis compare PROJECT_A PROJECT_B`, which also works on the new layout. That is the reusable "compare to prior known-good runs" from Bea's notes, and the source for the reviewer-facing change log.
 
 ### Step 1: Package hygiene (M1.1a)
 
@@ -550,7 +660,15 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
 - Add `project.py`: init from a manifest (knee-sarg CSV format), the folder layout, `status`, resume, staleness and `--from STAGE`.
 - Add `provenance.py`: hashing, environment and version capture, weight hashes and failure records.
 - Storage formats and retention (4.7).
-- Done when: on a 12-case project, killing the run midway and rerunning resumes where it stopped. Changing one parameter reruns only the affected stages. The cuberille-crash case ends as `failed` without stopping the batch. `oai-analysis status` matches the folder contents.
+- Plain-language statuses, `index.parquet`, the run summary, the device check and heartbeat, and the `--failed`/`--stale`/`--failed-at` selectors.
+- Optional DataLad mode (4.9).
+- Done when: on a 12-case project, killing the run midway and rerunning resumes where it stopped. Changing one parameter reruns only the affected stages. The cuberille-crash case ends as *Failed* without stopping the batch. `oai-analysis status` matches the folder contents. With `--datalad`, `datalad status` is clean after the run.
+
+### Step 4b: Sanity checks, review records and the report
+
+- `check()` on the default stages (4.10), `QCFinding`, *Needs Review* status, `oai-analysis review`, and `oai-analysis report`.
+- Tune the thresholds on the benchmark cases, using the Dec 18 triage as a reference: the Group 3 cases should come out *Needs Review* and the clean cases should not.
+- Done when: the report for the 12-case project shows the expected Succeeded / Needs Review / Failed split, and every flag has a plain-English message.
 
 ### Step 5: Second implementations (M1.2)
 
@@ -576,6 +694,8 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
   - an API overview (details stay in docstrings)
 - **Handoff guide** for UCSD: environment setup on their hardware, running a pilot batch, reading `status`, where results and provenance live, and known failure modes (cuberille crash, smoothing migration).
 - Update the notebooks to the new API, or mark them as legacy.
+- `CHANGELOG.md` with two parts per release: the engineering changes, and a plain-language **"What might look different"** section for reviewers, backed by `oai-analysis compare` numbers on the benchmark cases.
+- A one-page reviewer guide for non-engineers: reading the report, what *Needs Review* means, and how to record a decision or flag a case back with its case ID and note.
 
 ---
 
@@ -584,6 +704,10 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
 - **Algorithm changes.** Smoothing migration, the windowed-sinc filter, the cuberille crash fix and the 0-thickness edges stay as they are. They become config options or tracked issues and are evaluated with the Step 0 harness once the refactor lands.
 - **Dagster / Dask / SLURM orchestration.** knee-sarg keeps working through the legacy CLI. Running the new `oai-analysis run` from Dagster is a later step (the GDoc's Phase 4 backlog).
 - **1D descriptors, outlier flagging and the QC dashboard** belong to Phase 2. The `BiomarkerExtractor` slot and the project layout are designed so they plug in.
+- **Interactive UI** (Bea's no-code dashboard, triggering reruns from a browser, overlay viewers, comparison sliders, aggregate trend dashboards) and the **Aim 4.3 web app** (BIG-KP, itk-wasm, vtk.js) belong to Phases 2–3. Phase 1 supplies their data: `index.parquet`, `review.jsonl`, thumbnails and atlas-space meshes.
+- **OME-NGFF as the default image format.** The writer slot exists, but switching formats waits until a viewer needs it.
+- **Cross-cohort harmonization** (MOST, JoCo, UK Biobank; ComBat, cycle-GANs, mm-DeepAtlas).
+- **Batching inside Dagster itself.** Phase 1 gives Dagster `run_cases()`; changing knee-sarg to use it is a later step.
 - **A full 48k-case run.**
 
 ---
@@ -598,3 +722,6 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
 | Q4 | Is `requires-python >= 3.10` acceptable? knee-sarg's README still says 3.8, but venv11 is 3.11. | **Decided: 3.11 or newer.** Older versions are deprecated. |
 | Q5 | Docs tooling: MkDocs (Material + mkdocstrings), or plain Markdown in `docs/`? | **Decided: plain Markdown**, the simpler choice. |
 | Q6 | Is it OK for the *new* project layout to use different file formats (`.h5` transforms, `.nii.gz` images), while the legacy CLI keeps today's? | Yes. That is the biggest storage saving. |
+| Q7 | Should DataLad be optional (`--datalad`) or required in Phase 1? | **Optional.** It adds git-annex as a system dependency, and UCSD may not want it on day one. The layout is compatible either way. |
+| Q8 | Do the static HTML report and the review records (4.10) belong in Phase 1, or should they move to Phase 2 with the dashboard? | **Keep them in Phase 1.** They are small, they make the M1.4 handoff usable by non-engineers, and Phase 2 builds on their data. |
+| Q9 | Container recipe: Docker (from knee-sarg's Dockerfile), or a pixi environment like knee-sarg uses? | **Docker** for running anywhere, with the lock file usable by pixi or uv for local development. |

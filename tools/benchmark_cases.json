@@ -1,0 +1,20 @@
+{
+  "description": "Regression benchmark cases. 'oai' paths are relative to the OAI data root (e.g. O:/OAI); 'bundled' paths are relative to oai_analysis/data.",
+  "oai": [
+    {"name": "9016304_0M", "laterality": "left", "path": "OAIBaselineImages/results/0.C.2/9016304/20040917/10242106"},
+    {"name": "9016304_0M", "laterality": "right", "path": "OAIBaselineImages/results/0.C.2/9016304/20040917/10242112"},
+    {"name": "9021791_0M", "laterality": "left", "path": "OAIBaselineImages/results/0.C.2/9021791/20040922/10250903"},
+    {"name": "9021791_0M", "laterality": "right", "path": "OAIBaselineImages/results/0.C.2/9021791/20040922/10250909"},
+    {"name": "9094865_0M", "laterality": "left", "path": "OAIBaselineImages/results/0.C.2/9094865/20050204/10165606"},
+    {"name": "9094865_0M", "laterality": "right", "path": "OAIBaselineImages/results/0.C.2/9094865/20050204/10165612"},
+    {"name": "9016304_96M", "laterality": "left", "path": "OAI96MonthImages/results/10.C.1/9016304/20120831/13486606"},
+    {"name": "9016304_96M", "laterality": "right", "path": "OAI96MonthImages/results/10.C.1/9016304/20120831/13486612"},
+    {"name": "9021791_96M", "laterality": "left", "path": "OAI96MonthImages/results/10.C.1/9021791/20121016/13466523"},
+    {"name": "9021791_96M", "laterality": "right", "path": "OAI96MonthImages/results/10.C.1/9021791/20121016/13466530"},
+    {"name": "9040390_96M", "laterality": "left", "path": "OAI96MonthImages/results/10.C.1/9040390/20121219/13439303"},
+    {"name": "9040390_96M", "laterality": "right", "path": "OAI96MonthImages/results/10.C.1/9040390/20121219/13439309"}
+  ],
+  "bundled": [
+    {"name": "test_case", "laterality": "left", "path": "test_data/colab_case/image_preprocessed.nii.gz"}
+  ]
+}

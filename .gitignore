@@ -7,3 +7,7 @@ oai_analysis/data/
 venv/
 network_weights/
 gradICON_oai_halfres_weights
+
+# local data used by older code and the notebooks
+oai-analysis-test-data/
+notebooks/OAIData/

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import ClassVar
 
-from oai_analysis.cartilage_shape_processing import thickness_grid, thickness_grid_png
+from oai_analysis.algorithms.cartilage_shape_processing import thickness_grid, thickness_grid_png
 from oai_analysis.stages.base import BiomarkerExtractor, CaseArtifacts
 
 

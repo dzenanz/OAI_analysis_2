@@ -7,7 +7,7 @@ import itk
 import numpy as np
 import vtk
 
-from oai_analysis import mesh_processing as mp
+from oai_analysis.algorithms import mesh_processing as mp
 
 SERIES_DESCRIPTION_TAG = "0008|103e"
 

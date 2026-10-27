@@ -6,10 +6,10 @@ from abc import ABC, abstractmethod
 import torch
 import numpy as np
 
-from oai_analysis.segmentation.image_transforms import Partition
-from oai_analysis.segmentation.module_parameters import ParameterDict
-from oai_analysis.segmentation.networks import get_network
-from oai_analysis.segmentation.utils import initialize_model
+from oai_analysis.stages.segmentation.image_transforms import Partition
+from oai_analysis.stages.segmentation.module_parameters import ParameterDict
+from oai_analysis.stages.segmentation.networks import get_network
+from oai_analysis.stages.segmentation.utils import initialize_model
 
 def load_json_to_dict(json_file):
     para = ParameterDict()

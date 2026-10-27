@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import ClassVar
 
-from oai_analysis import mesh_processing as mp
+from oai_analysis.algorithms import mesh_processing as mp
 from oai_analysis.stages.base import AtlasMapper, MeshResult
 
 

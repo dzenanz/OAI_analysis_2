@@ -4,7 +4,7 @@ from typing import ClassVar
 import itk
 
 from oai_analysis.data import models_dir
-from oai_analysis.segmentation.segmenter import Segmenter3DInPatchClassWise
+from oai_analysis.stages.segmentation.segmenter import Segmenter3DInPatchClassWise
 from oai_analysis.stages.base import Segmenter
 
 

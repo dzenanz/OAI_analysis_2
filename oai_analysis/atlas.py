@@ -10,7 +10,7 @@ import itk
 import numpy as np
 import vtk
 
-from oai_analysis import mesh_processing as mp
+from oai_analysis.algorithms import mesh_processing as mp
 
 RESOURCES_DIR = Path(__file__).resolve().parent / "resources"
 DEFAULT_ATLAS_NAME = "atlas_60_LEFT_baseline_NMI"

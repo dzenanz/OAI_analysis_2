@@ -5,9 +5,9 @@ import numpy as np
 import vtk
 from vtk.util.numpy_support import numpy_to_vtk
 
-from oai_analysis import mesh_processing as mp
+from oai_analysis.algorithms import mesh_processing as mp
+from oai_analysis.algorithms.thickness_computation import DistanceMapMethod, compute_thickness
 from oai_analysis.stages.base import MeshResult, ThicknessEstimator
-from oai_analysis.thickness_computation import DistanceMapMethod, compute_thickness
 
 
 @dataclass

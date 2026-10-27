@@ -7,7 +7,7 @@ import vtk
 from scipy.interpolate import griddata
 from vtk.util.numpy_support import vtk_to_numpy
 
-from oai_analysis import mesh_processing as mp
+from oai_analysis.algorithms import mesh_processing as mp
 from oai_analysis.atlas import Atlas
 
 

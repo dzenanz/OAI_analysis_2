@@ -4,7 +4,7 @@ from typing import ClassVar
 import itk
 import vtk
 
-from oai_analysis import mesh_processing as mp
+from oai_analysis.algorithms import mesh_processing as mp
 from oai_analysis.stages.base import MeshGenerator
 
 

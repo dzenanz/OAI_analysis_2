@@ -8,7 +8,7 @@ import vtk
 from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
 
 from oai_analysis import OAPipeline
-from oai_analysis import mesh_processing as mp
+from oai_analysis.algorithms import mesh_processing as mp
 from oai_analysis.atlas import Atlas
 from oai_analysis.stages import (
     AtlasMapper,

@@ -3,7 +3,7 @@ import unittest
 import itk
 import oai_analysis.registration
 from oai_analysis.data import test_data_dir as data_dir
-from oai_analysis import mesh_processing as mp
+from oai_analysis.algorithms import mesh_processing as mp
 from oai_analysis.atlas import Atlas
 from oai_analysis.pipeline import default_device
 from oai_analysis.stages import UNetSegmenter

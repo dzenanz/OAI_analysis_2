@@ -650,7 +650,8 @@ The refactor needs a reference before anything moves.
 - `io.py`: reading the input, the DICOM series description, and one `write()` that picks the writer by type.
 - `CaseInfo` accepts only `left` or `right`. Before, anything other than `right` was treated as left.
 - `AnalysisObject` is a deprecated shim over `UNetSegmenter`, kept for the notebooks. The tests use the stages directly.
-- Not in this step: `check()`/`QCFinding` (Step 4b), `@register` (Step 3), and moving the algorithm modules into `algorithms/` and `stages/segmentation/` (4.1).
+- Not in this step: `check()`/`QCFinding` (Step 4b) and `@register` (Step 3).
+- A follow-up commit moved the files into the 4.1 layout, with no code changes beyond imports: `mesh_processing.py`, `thickness_computation.py` and `cartilage_shape_processing.py` are now in `oai_analysis/algorithms/`, and the `segmentation/` package is now `oai_analysis/stages/segmentation/`, next to `UNetSegmenter` (`unet.py`). Code and notebooks that import the old paths must switch to `oai_analysis.algorithms.mesh_processing` and so on.
 - Verification:
   - All 13 cases pass `compare_outputs` against `OAI_golden_f198a2f/run1`, 195/195 files, run through `analysis_pipeline()` from an unrelated CWD. The segmentation model was loaded once for all 13 cases. Cases took 226–300 s, 57 min in total.
   - knee-sarg's command line (`oai-analysis IMAGE OUT left`) on the colab case writes `FC_thickness.png`/`TC_thickness.png` and passes against the golden set.

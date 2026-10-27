@@ -1,6 +1,6 @@
 import pytest
 
-from oai_analysis import mesh_processing as mp
+from oai_analysis.algorithms import mesh_processing as mp
 import trimesh
 from pathlib import Path
 import numpy as np

@@ -1,23 +1,31 @@
 import numpy as np
-import icon_registration.pretrained_models
-import icon_registration.network_wrappers
+import icon_registration.config
 import icon_registration.itk_wrapper
+import torch
+from icon_registration.pretrained_models.lung_ct import init_network
+
+from oai_analysis import data
+
+GRADICON_KNEE_INPUT_SHAPE = [1, 1, 80, 192, 192]
 
 
-class AVSM_Registration:
-    def __init__(self, ckpoint_path, config_path):
-        self.ckpoint_path = ckpoint_path
-        self.config_path = config_path
+def gradicon_knee_model():
+    """
+    The GradICON model trained on OAI knees, equivalent to icon_registration's OAI_knees_gradICON_model(),
+    but with the weights from the oai_analysis data cache instead of ./network_weights.
+    """
+    net = init_network("knee", pretrained=False)
+    trained_weights = torch.load(data.gradicon_knee_weights(), map_location=torch.device("cpu"))
+    net.regis_net.load_state_dict(trained_weights, strict=False)
+    net.assign_identity_map(GRADICON_KNEE_INPUT_SHAPE)
+    net.to(icon_registration.config.device)
+    net.eval()
+    return net
 
-    def register(self, fixed_image, moving_image):
-        # Need to install easyreg first
-        import demo.demo_for_easyreg_eval as demo
-        #write_images
-        demo.do_registration_eval(args, [fixed_image_path, moving_image_path, none, none])
 
 class ICON_Registration:
     def __init__(self):
-        self.register_module = icon_registration.pretrained_models.OAI_knees_gradICON_model(pretrained=True)
+        self.register_module = gradicon_knee_model()
 
     def register(self, fixed_image, moving_image):
         print("fixed range", np.min(fixed_image), np.max(fixed_image))
@@ -25,6 +33,3 @@ class ICON_Registration:
         phi_fixed_moving, phi_moving_fixed = icon_registration.itk_wrapper.register_pair(self.register_module, fixed_image, moving_image)
 
         return phi_fixed_moving
-
-
-

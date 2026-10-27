@@ -26,13 +26,20 @@ CASES_FILE = pathlib.Path(__file__).resolve().parent / "benchmark_cases.json"
 
 
 def import_analysis_pipeline():
+    """Return analysis_pipeline() and the directory that bundled case paths are relative to."""
     try:
+        from oai_analysis.data import test_data_dir
         from oai_analysis.pipeline import analysis_pipeline
+
+        return analysis_pipeline, test_data_dir().parent
     except ImportError:
-        # pipeline.py at f198a2f only works with oai_analysis/ on sys.path
+        # pipeline.py up to f198a2f only works with oai_analysis/ on sys.path,
+        # and uniGradICON loads its weights from ./network_weights, relative to the working directory
         sys.path.insert(0, str(PACKAGE_DIR))
+        os.chdir(PACKAGE_DIR)
         from pipeline import analysis_pipeline
-    return analysis_pipeline
+
+        return analysis_pipeline, PACKAGE_DIR / "data"
 
 
 def git_info():
@@ -60,12 +67,12 @@ def environment_info():
     }
 
 
-def select_cases(args):
+def select_cases(args, bundled_data_dir):
     with open(CASES_FILE) as f:
         cases_spec = json.load(f)
     cases = []
     for case in cases_spec["bundled"]:
-        cases.append({**case, "input": str(PACKAGE_DIR / "data" / case["path"])})
+        cases.append({**case, "input": str(bundled_data_dir / case["path"])})
     if not args.bundled_only:
         for case in cases_spec["oai"]:
             cases.append({**case, "input": str(pathlib.Path(args.oai_dir) / case["path"])})
@@ -87,11 +94,8 @@ def main():
 
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    cases = select_cases(args)
-    analysis_pipeline = import_analysis_pipeline()
-
-    # uniGradICON loads its weights from ./network_weights, relative to the working directory
-    os.chdir(PACKAGE_DIR)
+    analysis_pipeline, bundled_data_dir = import_analysis_pipeline()
+    cases = select_cases(args, bundled_data_dir)
 
     run_info = {
         "started": datetime.datetime.now().astimezone().isoformat(),

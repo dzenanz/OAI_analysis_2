@@ -1,12 +1,15 @@
 # Usage
-# python oai_analysis/pipeline_cli.py oai_analysis/data/test_data/colab_case/image_preprocessed.nii.gz OAI_results
+# oai-analysis IMAGE OUTPUT_DIR left|right
+# python -m oai_analysis IMAGE OUTPUT_DIR left|right
+# python oai_analysis/pipeline_cli.py IMAGE OUTPUT_DIR left|right  (the package must be installed)
 
 import argparse
-from pipeline import analysis_pipeline
+
+from oai_analysis.pipeline import analysis_pipeline
 
 
 def main():
-    parser = argparse.ArgumentParser(description='OAI Analysis CLI')
+    parser = argparse.ArgumentParser(prog='oai-analysis', description='OAI Analysis CLI')
     parser.add_argument('input_path', type=str, help='Path to image file or directory containing DICOM series')
     parser.add_argument('output_dir', type=str, help='Directory to make output files')
     parser.add_argument('laterality', type=str, help='Knee: left or right')

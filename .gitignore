@@ -6,3 +6,4 @@ pretrained_OAI_model
 oai_analysis/data/
 venv/
 network_weights/
+gradICON_oai_halfres_weights

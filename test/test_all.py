@@ -6,6 +6,7 @@ import oai_analysis.registration
 from oai_analysis.data import test_data_dir as data_dir
 from oai_analysis.data import atlases_dir
 from oai_analysis import mesh_processing as mp
+from oai_analysis.atlas import Atlas
 import numpy as np
 
 class TestOAIAnalysis(unittest.TestCase):
@@ -39,10 +40,8 @@ class TestOAIAnalysis(unittest.TestCase):
         correct_FC_segmentation = itk.imread(self.data / "colab_case" / "FC_probmap.nii.gz", itk.D)
         correct_TC_segmentation = itk.imread(self.data / "colab_case" / "TC_probmap.nii.gz", itk.D)
 
-        inner_mesh_fc_atlas = mp.read_vtk_mesh(
-            atlases_dir() / "atlas_60_LEFT_baseline_NMI/atlas_FC_inner_mesh_LPS.ply")
-        inner_mesh_tc_atlas = mp.read_vtk_mesh(
-            atlases_dir() / "atlas_60_LEFT_baseline_NMI/atlas_TC_inner_mesh_LPS.ply")
+        inner_mesh_fc_atlas = Atlas.default().inner_mesh["FC"]
+        inner_mesh_tc_atlas = Atlas.default().inner_mesh["TC"]
 
         def deform_probmap(phi_AB, image_A, image_B, prob_map):
             interpolator = itk.LinearInterpolateImageFunction.New(image_A)

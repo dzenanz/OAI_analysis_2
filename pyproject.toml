@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
@@ -7,8 +7,8 @@ name = "oai-analysis"
 dynamic = ["version"]
 description = 'Image analysis for the Osteoarthritis Initiative (OAI) knee magnetic resonance image (MRI) dataset.'
 readme = "README.md"
-requires-python = ">=3.8"
-license = "MIT"
+requires-python = ">=3.11"
+license = "Apache-2.0"
 keywords = []
 authors = [
   { name = "Marc Niethammer", email = "mn@cs.unc.edu" },
@@ -20,29 +20,38 @@ authors = [
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python",
-  "Programming Language :: Python :: 3.8",
-  "Programming Language :: Python :: 3.9",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: Implementation :: CPython",
-  "Programming Language :: Python :: Implementation :: PyPy",
 ]
+# Lower bounds are the versions the regression baseline was produced with; upper bounds exclude the next major version.
+# For CUDA, install torch from https://pytorch.org/get-started/locally/ first.
 dependencies = [
-  "torch",
-  # "torch==2.14.0+cu132",
-  "itk==5.4.7",
-  "itk-cuberille==2.7.2",
-  "itk-parabolicmorphology==1.3.1",
-  "trimesh==5.1.0",
-  "vtk==9.7.1",
-  "icon_registration==1.1.8",
-  "unigradicon==1.0.5",
-  "pooch==1.9.0",
-  "scikit-image==0.26.0",
-  "scikit-learn==1.9.1",
-  "zarr==2.18.7",
+  "torch>=2.6",
+  "itk>=5.4.7,<6",
+  "itk-cuberille>=2.7.2,<3",
+  "itk-parabolicmorphology>=1.3.1,<2",
+  "trimesh>=5.1,<6",
+  "vtk>=9.7.1,<10",
+  "icon_registration>=1.1.8,<2",
+  "unigradicon>=1.0.5,<2",
+  "pooch>=1.9,<2",
+  "numpy>=2.2,<3",
+  "scipy>=1.14,<2",
+  "matplotlib>=3.9,<4",
+  "scikit-image>=0.26,<1",
+  "scikit-learn>=1.9.1,<2",
 ]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "coverage[toml]>=6.5",
+]
+
+[project.scripts]
+oai-analysis = "oai_analysis.pipeline_cli:main"
 
 [project.urls]
 Documentation = "https://github.com/uncbiag/OAI_analysis_2#readme"
@@ -50,16 +59,19 @@ Issues = "https://github.com/uncbiag/OAI_analysis_2/issues"
 Source = "https://github.com/uncbiag/OAI_analysis_2"
 
 [tool.hatch.version]
-path = "oai_analysis/__about__.py"
+source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["oai_analysis"]
+
+[tool.hatch.build.targets.sdist]
+include = ["oai_analysis", "test", "tools", "README.md", "LICENSE"]
 
 [tool.hatch.envs.default]
-dependencies = [
-  "coverage[toml]>=6.5",
-  "pytest",
-]
+features = ["dev"]
 [tool.hatch.envs.default.scripts]
-test = "pytest {args:tests}"
-test-cov = "coverage run -m pytest {args:tests}"
+test = "pytest {args:test}"
+test-cov = "coverage run -m pytest {args:test}"
 cov-report = [
   "- coverage combine",
   "coverage report",
@@ -70,7 +82,7 @@ cov = [
 ]
 
 [[tool.hatch.envs.all.matrix]]
-python = ["3.8", "3.9", "3.10", "3.11", "3.12"]
+python = ["3.11", "3.12", "3.13"]
 
 [tool.hatch.envs.lint]
 detached = true
@@ -80,7 +92,7 @@ dependencies = [
   "ruff>=0.0.243",
 ]
 [tool.hatch.envs.lint.scripts]
-typing = "mypy --install-types --non-interactive {args:oai_analysis tests}"
+typing = "mypy --install-types --non-interactive {args:oai_analysis test}"
 style = [
   "ruff {args:.}",
   "black --check --diff {args:.}",
@@ -153,19 +165,16 @@ ban-relative-imports = "all"
 
 [tool.ruff.per-file-ignores]
 # Tests can use magic values, assertions, and relative imports
-"tests/**/*" = ["PLR2004", "S101", "TID252"]
+"test/**/*" = ["PLR2004", "S101", "TID252"]
 
 [tool.coverage.run]
-source_pkgs = ["oai_analysis", "tests"]
+source_pkgs = ["oai_analysis", "test"]
 branch = true
 parallel = true
-omit = [
-  "oai_analysis/__about__.py",
-]
 
 [tool.coverage.paths]
 oai_analysis = ["oai_analysis", "*/oai-analysis/oai_analysis"]
-tests = ["tests", "*/oai-analysis/tests"]
+tests = ["test", "*/oai-analysis/test"]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -173,3 +182,6 @@ exclude_lines = [
   "if __name__ == .__main__.:",
   "if TYPE_CHECKING:",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["test"]

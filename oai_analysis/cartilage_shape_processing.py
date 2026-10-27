@@ -1,11 +1,13 @@
 import os
-import pathlib
 
 import matplotlib.pyplot as plt
 import numpy as np
 import vtk
 from scipy.interpolate import griddata
 from vtk.util.numpy_support import vtk_to_numpy
+
+from oai_analysis import mesh_processing as mp
+from oai_analysis.atlas import Atlas
 
 
 def __generate_mask(vertice, mask, interx, intery, startx, starty):
@@ -75,6 +77,7 @@ def map_thickness_to_2D_projection(atlas_mesh_with_thickness, atlas_2d_map_file=
     """
     Map thickness of a registered mesh to the 2d projection of the atlas mesh
     :param atlas_mesh_with_thickness: atlas mesh which the source mesh was registered to
+    :param atlas_2d_map_file: 2D embedding of the atlas mesh vertices, as a numpy array or a .npy file
     :param map_2d_base_filename: filename to save the 2d contour with mapped thickness (as png) and the raw values as a numpy array
     :param  name: name of the projection
     :param  overwrite: overwrite if the files already exist
@@ -97,7 +100,7 @@ def map_thickness_to_2D_projection(atlas_mesh_with_thickness, atlas_2d_map_file=
     else:
         raise TypeError("atlas mesh is either a file path or a vtkPolyData")
 
-    embedded = np.load(atlas_2d_map_file)
+    embedded = atlas_2d_map_file if isinstance(atlas_2d_map_file, np.ndarray) else np.load(atlas_2d_map_file)
     # thickness = atlas_mesh_with_thickness.GetPointData().GetScalars()  # equivalent to below
     thickness_vtk = atlas_mesh_with_thickness.GetPointData().GetArray(0)
     thickness = vtk_to_numpy(thickness_vtk)
@@ -107,7 +110,7 @@ def map_thickness_to_2D_projection(atlas_mesh_with_thickness, atlas_2d_map_file=
                                      fpth_png=map_2d_file_png, name=name)
 
 
-def thickness_3d_to_2d(mapped_mesh, mesh_type: str, output_filename):
-    ATLAS_DIR = pathlib.Path(__file__).parent / "data" / "atlases" / "atlas_60_LEFT_baseline_NMI"
-    map_thickness_to_2D_projection(mapped_mesh, ATLAS_DIR / f"{mesh_type}_inner_embedded.npy", output_filename,
+def thickness_3d_to_2d(mapped_mesh, mesh_type: str, output_filename, atlas=None):
+    atlas = atlas or Atlas.default()
+    map_thickness_to_2D_projection(mapped_mesh, atlas.embedding_2d[mesh_type], output_filename,
                                    name=f'{mesh_type}_2D_map', overwrite=True)

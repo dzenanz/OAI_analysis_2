@@ -521,7 +521,7 @@ ITK's `imwrite` takes a `compression_level`, `.npy` arrays become compressed `.n
 
 Provenance records the hashes of deleted intermediates, so lineage survives pruning. The legacy CLI keeps its exact current filenames and formats.
 
-All file writing goes through `io.py` writers chosen by artifact type. That keeps Aim 4.2 open: an **OME-NGFF (OME-Zarr)** image writer can be added as another `image_format` option (`zarr` is already a dependency) without touching any stage. Scalar results (status, QC metrics, per-case biomarker summaries) go to **Parquet** from the start (adds a `pyarrow` dependency).
+All file writing goes through `io.py` writers chosen by artifact type. That keeps Aim 4.2 open: an **OME-NGFF (OME-Zarr)** image writer can be added as another `image_format` option (`zarr` gets added back as a dependency then; Step 1 removed it as unused) without touching any stage. Scalar results (status, QC metrics, per-case biomarker summaries) go to **Parquet** from the start (adds a `pyarrow` dependency).
 
 ### 4.8 Packaging and data (M1.1)
 
@@ -621,6 +621,18 @@ The refactor needs a reference before anything moves.
 - Delete the dead code listed in finding #10, and fix the `mp` import in `cartilage_shape_processing.py`.
 - Update `pyproject.toml`: license, Python floor, dependency ranges, `hatch-vcs`, the console script, a `[dev]` extra, and the hatch test path.
 - Done when: a clean-venv non-editable install runs the colab case, and Step 0 passes on all 12 cases. Nothing should change numerically here.
+
+**Status: done** (2026-10-27, branch `refactor`).
+- Absolute imports throughout (including `segmentation/segmenter.py`). Added `oai_analysis/__main__.py` and the `oai-analysis` console script, which keeps the `pipeline_cli.py` arguments knee-sarg uses.
+- `data.py` fetches into `pooch.os_cache("oai-analysis")`, which `OAI_ANALYSIS_DATA` overrides. It creates nothing at import time. The uniGradICON and GradICON-knee weights are now in its registry with sha256 checks, and `pipeline.py` passes `weights_location`, so `./network_weights` is never created.
+- `atlas.py`: `Atlas.default()` loads the atlas image from the cache, plus `inner_mesh[...]` and `embedding_2d[...]`, once per process. The small atlas files that were only in git (the LPS/smooth `.ply` meshes, the 2D embeddings and `atlas_fc`/`atlas_tc`) moved to package data in `oai_analysis/resources/`. The 75 MB `atlas_image.nii.gz` is no longer tracked, since it is identical to the release tarball copy. Publishing a new release asset that holds the small files too would let them leave the package, but that is not required.
+- Deleted `AVSM_Registration`, `dask_processing.py`, and the Dask notebooks that only used it. `AnalysisObject` creates the GradICON registerer only when `register()` is called, and it gets its atlas from `Atlas.default()`. Fixed the missing `mp` import in `cartilage_shape_processing.py`.
+- `pyproject.toml`: Apache-2.0, Python >=3.11, dependency ranges (floor = baseline version, below the next major), and the missing direct dependencies added (numpy, scipy, matplotlib). `zarr` was dropped as unused. Also: hatch-vcs, the console script, the `[dev]` extra, `test/` paths, and an explicit wheel/sdist content list. The wheel is 2.5 MB.
+- **The version needs a tag on `main`.** `v2.0.0` sits on the old `master` branch, so hatch-vcs currently reports `0.1.dev221+g…`. Tagging `main` (for example `v2.0.1` once these PRs land) fixes that.
+- Verification:
+  - All 13 cases pass `compare_outputs` against `OAI_golden_f198a2f/run1`, 195/195 files, run from an unrelated CWD.
+  - A clean Python 3.11 venv with a non-editable wheel install (which resolved the newer `icon_registration` 1.1.9 and `unigradicon` 1.0.6) ran the colab case through the `oai-analysis` console script from an unrelated CWD and passes against the golden set.
+  - `test_SegmentationCPU` fails at 12.12 vs a limit of 12. The f198a2f golden prob map gives the same 12.12, so this failure predates Step 1 and comes from the Sep 2026 dependency update. It is left for Step 6.
 
 ### Step 2: Stage interfaces + default implementations + `OAPipeline` (M1.1b)
 

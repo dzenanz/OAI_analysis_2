@@ -5,7 +5,7 @@ mesh splitting, mesh thickness computation, mesh attributes mapping to atlas mes
 connected component analysis of mesh.
 
 Sample usage for thickness computation
-    import mesh_processing as mp
+    from oai_analysis import mesh_processing as mp
     distance_inner, distance_outer = mp.get_thickness_mesh(itk_image, mesh_type=='FC')
 
 Sample usage for mapping attributes/data to atlas mesh (target mesh)

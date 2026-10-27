@@ -1,10 +1,10 @@
-import itk
 import torch
-import oai_analysis.segmentation.segmenter
-import oai_analysis.registration
-from oai_analysis.data import atlases_dir, models_dir
 
-import os
+import oai_analysis.registration
+import oai_analysis.segmentation.segmenter
+from oai_analysis.atlas import Atlas
+from oai_analysis.data import models_dir
+
 
 class AnalysisObject:
     def __init__(self):
@@ -28,22 +28,20 @@ class AnalysisObject:
             mode="pred", config=segmenter_config
         )
 
-        ## Initialize registerer
-        #self.registerer = oai_analysis.registration.AVSM_Registration(
-        #    from oai_analysis.test_data import data_dir
-        #    ckpoint_path = data_dir() / "pre_trained_registration_model"
-        #    config_path = data_dir() / "avsm_settings"
-        #
+        # The GradICON knee registerer is only created when register() is called:
+        # the pipeline registers with uniGradICON instead.
+        self.registerer = None
 
-        self.registerer = oai_analysis.registration.ICON_Registration()
-
-        ## Load Atlas
-        self.atlas_image = itk.imread(atlases_dir() / "atlas_60_LEFT_baseline_NMI" / "atlas_image.nii.gz")
+    @property
+    def atlas_image(self):
+        return Atlas.default().image
 
     def segment(self, preprocessed_image):
         FC_probmap, TC_probmap = self.segmenter.segment(preprocessed_image, if_output_prob_map=True, if_output_itk=True)
         return (FC_probmap, TC_probmap)
 
     def register(self, preprocessed_image):
+        if self.registerer is None:
+            self.registerer = oai_analysis.registration.ICON_Registration()
         registration = self.registerer.register(preprocessed_image, self.atlas_image)
         return registration

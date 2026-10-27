@@ -1,5 +1,10 @@
-__version__ = '0.1'
+# SPDX-FileCopyrightText: 2023-present OAI Analysis Development Team
+#
+# SPDX-License-Identifier: Apache-2.0
+from importlib.metadata import PackageNotFoundError, version
 
-#from .analysis_object import AnalysisObject
-#from oai_analysis import mesh_processing
+try:
+    __version__ = version("oai-analysis")  # from git tags, via hatch-vcs
+except PackageNotFoundError:  # not installed
+    __version__ = "unknown"
 

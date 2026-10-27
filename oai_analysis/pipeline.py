@@ -9,13 +9,12 @@ import vtk
 from unigradicon import get_unigradicon
 from vtk.util.numpy_support import numpy_to_vtk
 
-import mesh_processing as mp
-from analysis_object import AnalysisObject
-from cartilage_shape_processing import thickness_3d_to_2d
-from thickness_computation import compute_thickness
-
-DATA_DIR = pathlib.Path(__file__).parent / "data"
-
+from oai_analysis import data
+from oai_analysis import mesh_processing as mp
+from oai_analysis.analysis_object import AnalysisObject
+from oai_analysis.atlas import Atlas
+from oai_analysis.cartilage_shape_processing import thickness_3d_to_2d
+from oai_analysis.thickness_computation import compute_thickness
 
 
 def transform_mesh(mesh, transform, filename_prefix, keep_intermediate_outputs):
@@ -126,18 +125,14 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
         itk.imwrite(FC_prob, os.path.join(output_path, "FC_prob.nrrd"))
         itk.imwrite(TC_prob, os.path.join(output_path, "TC_prob.nrrd"))
 
-    atlas_filename = DATA_DIR / "atlases/atlas_60_LEFT_baseline_NMI/atlas_image.nii.gz"
-    atlas_image = itk.imread(atlas_filename, itk.F)
-
-    inner_mesh_fc_atlas = mp.read_vtk_mesh(
-        DATA_DIR / "atlases/atlas_60_LEFT_baseline_NMI/atlas_FC_inner_mesh_LPS.ply")
-    inner_mesh_tc_atlas = mp.read_vtk_mesh(
-        DATA_DIR / "atlases/atlas_60_LEFT_baseline_NMI/atlas_TC_inner_mesh_LPS.ply")
+    atlas = Atlas.default()
+    inner_mesh_fc_atlas = atlas.inner_mesh["FC"]
+    inner_mesh_tc_atlas = atlas.inner_mesh["TC"]
 
     print("Registering the input image to the atlas")
-    model = get_unigradicon()
+    model = get_unigradicon(weights_location=str(data.unigradicon_weights()))
     in_image_D = in_image.astype(itk.D)
-    atlas_image_D = atlas_image.astype(itk.D)
+    atlas_image_D = atlas.image.astype(itk.D)
     phi_AB, phi_BA = itk_wrapper.register_pair(model, in_image_D, atlas_image_D, finetune_steps=2)
     if keep_intermediate_outputs:
         print("Saving registration results")
@@ -202,8 +197,8 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
         mp.write_vtk_mesh(mapped_mesh_tc, output_path + "/TC_mapped_mesh.vtk")
 
     print("Projecting thickness to 2D")
-    thickness_3d_to_2d(mapped_mesh_fc, mesh_type='FC', output_filename=output_path + '/FC_thickness')
-    thickness_3d_to_2d(mapped_mesh_tc, mesh_type='TC', output_filename=output_path + '/TC_thickness')
+    thickness_3d_to_2d(mapped_mesh_fc, mesh_type='FC', output_filename=output_path + '/FC_thickness', atlas=atlas)
+    thickness_3d_to_2d(mapped_mesh_tc, mesh_type='TC', output_filename=output_path + '/TC_thickness', atlas=atlas)
 
 
 if __name__ == "__main__":
@@ -237,7 +232,7 @@ if __name__ == "__main__":
         }
     else:  # only run on the test case bundled with the code
         test_cases = {
-            f"{DATA_DIR}/test_data/colab_case/image_preprocessed.nii.gz": {
+            f"{data.test_data_dir()}/colab_case/image_preprocessed.nii.gz": {
                 "laterality": "left", "name": "test_case"},
         }
 

@@ -19,6 +19,8 @@
 pip install oai-analysis
 ```
 
+Python 3.11 or newer is required.
+
 ## Introduction
 
 This repository contains open-source analysis approaches for the [Osteoarthritis Initiative (OAI)](https://nda.nih.gov/oai/) magnetic resonance image (MRI) data.
@@ -75,9 +77,20 @@ Contributions are appreciated and welcome.
 ```
 git clone https://github.com/uncbiag/OAI_analysis_2
 cd OAI_analysis_2
-pip install -e .
-pip install pytest
+pip install -e ".[dev]"
 pytest
+```
+
+Python 3.11 or newer is required. For GPU processing, install the CUDA build of PyTorch first,
+following https://pytorch.org/get-started/locally/.
+
+Atlases, network weights and test data are downloaded on first use into a per-user cache directory
+(on Windows `%LOCALAPPDATA%\oai-analysis\oai-analysis\Cache`, on Linux `~/.cache/oai-analysis`).
+Set the `OAI_ANALYSIS_DATA` environment variable to use a different directory.
+
+To process one knee image (a file, or a directory with a DICOM series):
+```
+oai-analysis IMAGE OUTPUT_DIR left
 ```
 
 To view the demo notebooks:

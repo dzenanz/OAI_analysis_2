@@ -84,7 +84,7 @@ pytest
 Python 3.11 or newer is required. For GPU processing, install the CUDA build of PyTorch first,
 following https://pytorch.org/get-started/locally/.
 
-Atlases, network weights and test data are downloaded on first use into a per-user cache directory
+Network weights and test data are downloaded on first use into a per-user cache directory
 (on Windows `%LOCALAPPDATA%\oai-analysis\oai-analysis\Cache`, on Linux `~/.cache/oai-analysis`).
 Set the `OAI_ANALYSIS_DATA` environment variable to use a different directory.
 

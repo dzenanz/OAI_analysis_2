@@ -4,7 +4,6 @@ import itk
 import oai_analysis.analysis_object
 import oai_analysis.registration
 from oai_analysis.data import test_data_dir as data_dir
-from oai_analysis.data import atlases_dir
 from oai_analysis import mesh_processing as mp
 from oai_analysis.atlas import Atlas
 import numpy as np
@@ -98,13 +97,12 @@ class TestImports(unittest.TestCase):
 class TestICONRegistration(unittest.TestCase):
     def setUp(self):
         self.data = data_dir()
-        self.atlases = atlases_dir()
 
     def test_RegistrationCPU(self):
         ICON_obj = oai_analysis.registration.ICON_Registration()
 
         image_A = itk.imread(self.data / "colab_case" / "image_preprocessed.nii.gz")
-        image_B = itk.imread(self.atlases / "atlas_60_LEFT_baseline_NMI" / "atlas_image.nii.gz")
+        image_B = Atlas.default().image
 
         ICON_obj.register(image_A, image_B)
 

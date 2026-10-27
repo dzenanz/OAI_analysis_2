@@ -1,5 +1,5 @@
 """
-Downloadable data: atlases, model weights and test data.
+Downloadable data: model weights and test data. The atlas ships with the package (see atlas.py).
 
 Everything is fetched with pooch into a per-user cache directory and checked against its sha256.
 Set the OAI_ANALYSIS_DATA environment variable to use a different directory, e.g. a shared one on a cluster.
@@ -11,7 +11,6 @@ import pooch
 
 github_release_tag = 'v2.0.0'
 test_data_sha256 = "bfb5d5f17ff0886f5815c79fba119fc4294c35b8f9fcd586a171d9310cd90cdf"
-atlases_sha256 = "9332f6756efcc6f525a8cf1807cfe793405181047f850d68fd962ad8e5ac1d7a"
 models_sha256 = "ffd081ba26f9908f17790ecdb8b1d025bff32ccbdced9bf55158166561064458"
 unigradicon_sha256 = "1fcfa02214540915cad7b768570add2b4247c22c516d75a21e0e8258f50254a6"
 gradicon_knee_sha256 = "8696b2cb072792e75074d7d3ac9975677d6bdc7659fe3901ca20aa42b0b43b99"
@@ -22,7 +21,6 @@ data_fetcher = pooch.create(
     env="OAI_ANALYSIS_DATA",
     registry={
         "oai-analysis-test-data.tar.gz": f"sha256:{test_data_sha256}",
-        "oai-analysis-atlases.tar.gz": f"sha256:{atlases_sha256}",
         "oai-analysis-models.tar.gz": f"sha256:{models_sha256}",
         "unigradicon1.0/Step_2_final.trch": f"sha256:{unigradicon_sha256}",
         "gradicon_knee/knee_model_weights_step_2.trch": f"sha256:{gradicon_knee_sha256}",
@@ -49,10 +47,6 @@ def _fetch_and_extract(archive, extract_dir):
 
 def test_data_dir():
     return _fetch_and_extract("oai-analysis-test-data.tar.gz", "test_data")
-
-
-def atlases_dir():
-    return _fetch_and_extract("oai-analysis-atlases.tar.gz", "atlases")
 
 
 def models_dir():

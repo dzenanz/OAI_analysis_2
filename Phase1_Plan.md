@@ -651,7 +651,10 @@ The refactor needs a reference before anything moves.
 - `CaseInfo` accepts only `left` or `right`. Before, anything other than `right` was treated as left.
 - `AnalysisObject` is a deprecated shim over `UNetSegmenter`, kept for the notebooks. The tests use the stages directly.
 - Not in this step: `check()`/`QCFinding` (Step 4b), `@register` (Step 3), and moving the algorithm modules into `algorithms/` and `stages/segmentation/` (4.1).
-- Verification: VERIFICATION_PENDING
+- Verification:
+  - All 13 cases pass `compare_outputs` against `OAI_golden_f198a2f/run1`, 195/195 files, run through `analysis_pipeline()` from an unrelated CWD. The segmentation model was loaded once for all 13 cases. Cases took 226–300 s, 57 min in total.
+  - knee-sarg's command line (`oai-analysis IMAGE OUT left`) on the colab case writes `FC_thickness.png`/`TC_thickness.png` and passes against the golden set.
+  - `pytest`: 15 passed (8 of them the new `test/test_stages.py`, which checks the stage wiring, the flat file names and the one-time `setup()` with lightweight fake stages). `test_SegmentationCPU` still fails at 12.12 vs 12, as before Step 1.
 
 ### Step 2b: Split by cell IDs instead of transforming the halves back (separate commit)
 

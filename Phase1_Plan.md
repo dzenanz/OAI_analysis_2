@@ -641,6 +641,18 @@ The refactor needs a reference before anything moves.
 - `analysis_pipeline()` and `pipeline_cli.py` become thin wrappers that write today's flat filenames.
 - Done when: Step 0 passes, knee-sarg's command line produces `FC_thickness.png`/`TC_thickness.png`, and processing N cases loads each model once.
 
+**Status: done** (2026-10-27, branch `refactor`).
+- `oai_analysis/stages/`: `base.py` has the seven interfaces from 4.2, plus `CaseInfo`, `RegistrationResult`, `CaseArtifacts`, and `MeshResult` (a mesh plus named intermediate outputs, such as the inner surface, for the runner to save). The default implementations call the algorithm functions unchanged: `OAIPreprocessor`, `UNetSegmenter`, `UniGradICONRegisterer`, `CuberilleMeshGenerator`, `MeshSplittingThickness`, `ClosestPointAtlasMapper` and `ThicknessMap2D`. The hidden constants became fields (window percentiles, batch and overlap size, fine-tuning steps, iso-surface value, smoothing iterations, island distance, grid resolution).
+- `DistanceTransformThickness` also moved now, because its code was the unused `else` branch in `pipeline.py`. `GradICONKneeRegisterer` waits for Step 5; `registration.ICON_Registration` is unchanged.
+- `pipeline.py` holds `OAPipeline` and no algorithm code. `setup()` runs once per pipeline object, before the first case. `run_case()` returns a `CaseArtifacts` with everything in memory and, given an output directory, writes today's flat file names as each stage finishes. `analysis_pipeline()` keeps its signature and reuses one cached default pipeline, so a loop over cases loads the models once. `oai_analysis.OAPipeline` and `oai_analysis.CaseInfo` are imported lazily, so `import oai_analysis.data` stays light.
+- `mesh_processing.transform_mesh(mesh, transform)` replaces the pipeline's version. It keeps the same ITK write/read round trip, but through a temp directory instead of the output directory.
+- `ThicknessMap2D` returns the 2D grid and the PNG bytes instead of writing files. `cartilage_shape_processing` gained `thickness_grid()` and `thickness_grid_png()` for that; `thickness_3d_to_2d()` still works for the notebooks.
+- `io.py`: reading the input, the DICOM series description, and one `write()` that picks the writer by type.
+- `CaseInfo` accepts only `left` or `right`. Before, anything other than `right` was treated as left.
+- `AnalysisObject` is a deprecated shim over `UNetSegmenter`, kept for the notebooks. The tests use the stages directly.
+- Not in this step: `check()`/`QCFinding` (Step 4b), `@register` (Step 3), and moving the algorithm modules into `algorithms/` and `stages/segmentation/` (4.1).
+- Verification: VERIFICATION_PENDING
+
 ### Step 2b: Split by cell IDs instead of transforming the halves back (separate commit)
 
 This change is mainly about performance. Today `MeshSplittingThickness` transforms the patient mesh into atlas space and splits it there. It then transforms **both halves back** to patient space (`pipeline.py:167-170`: 4 extra `transform_mesh` calls per case, each a disk round trip through ITK) before measuring distances.

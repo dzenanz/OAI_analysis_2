@@ -1,96 +1,171 @@
+"""
+OAPipeline wires the stages together in their fixed order. It holds no algorithm code.
+
+analysis_pipeline() is the original entry point, kept with the same signature and output files.
+"""
+import functools
 import os
-import pathlib
 import sys
 
-import icon_registration.itk_wrapper as itk_wrapper
-import itk
-import numpy as np
-import vtk
-from unigradicon import get_unigradicon
-from vtk.util.numpy_support import numpy_to_vtk
+import torch
 
-from oai_analysis import data
-from oai_analysis import mesh_processing as mp
-from oai_analysis.analysis_object import AnalysisObject
-from oai_analysis.atlas import Atlas
-from oai_analysis.cartilage_shape_processing import thickness_3d_to_2d
-from oai_analysis.thickness_computation import compute_thickness
+from oai_analysis import data, io
+from oai_analysis.atlas import STRUCTURES, Atlas
+from oai_analysis.stages import (
+    AtlasMapper,
+    BiomarkerExtractor,
+    CaseArtifacts,
+    CaseInfo,
+    ClosestPointAtlasMapper,
+    CuberilleMeshGenerator,
+    MeshGenerator,
+    MeshSplittingThickness,
+    OAIPreprocessor,
+    Preprocessor,
+    Registerer,
+    Segmenter,
+    ThicknessEstimator,
+    ThicknessMap2D,
+    UNetSegmenter,
+    UniGradICONRegisterer,
+)
 
 
-def transform_mesh(mesh, transform, filename_prefix, keep_intermediate_outputs):
+def default_device():
+    if torch.cuda.is_available():
+        return "cuda"
+    print("WARNING: CUDA NOT AVAILABLE, FALLING BACK TO CPU")
+    return "cpu"
+
+
+class OAPipeline:
     """
-    Transform the input mesh using the provided transform.
+    Computes cartilage thickness for femur and tibia from knee MRI.
 
-    :param mesh: input mesh
-    :param transform: The modelling transform to use (the inverse of image resampling transform)
-    :param filename_prefix: prefix (including path) for the intermediate file names
-    :return: transformed mesh
+    Every stage has a default; pass an instance to replace it. Models are loaded once, before the first case,
+    and reused for every following case.
     """
-    itk_mesh = mp.get_itk_mesh(mesh)
-    t_mesh = itk.transform_mesh_filter(itk_mesh, transform=transform)
-    # itk.meshwrite(t_mesh, filename_prefix + "_transformed.vtk", binary=True)  # does not work in 5.4 and earlier
-    itk.meshwrite(t_mesh, filename_prefix + "_transformed.vtk", compression=True)
 
-    transformed_mesh = mp.read_vtk_mesh(filename_prefix + "_transformed.vtk")
-    transformed_mesh.GetPointData().AddArray(mesh.GetPointData().GetArray(0))  # transfer thickness
+    def __init__(self,
+                 preprocessor: Preprocessor | None = None,
+                 segmenter: Segmenter | None = None,
+                 registerer: Registerer | None = None,
+                 mesh_generator: MeshGenerator | None = None,
+                 thickness_estimator: ThicknessEstimator | None = None,
+                 atlas_mapper: AtlasMapper | None = None,
+                 biomarker_extractors: list[BiomarkerExtractor] | None = None,
+                 atlas: Atlas | None = None,
+                 device: str | None = None):
+        self.preprocessor = preprocessor or OAIPreprocessor()
+        self.segmenter = segmenter or UNetSegmenter()
+        self.registerer = registerer or UniGradICONRegisterer()
+        self.mesh_generator = mesh_generator or CuberilleMeshGenerator()
+        self.thickness_estimator = thickness_estimator or MeshSplittingThickness()
+        self.atlas_mapper = atlas_mapper or ClosestPointAtlasMapper()
+        self.biomarker_extractors = biomarker_extractors if biomarker_extractors is not None else [ThicknessMap2D()]
+        self.atlas = atlas or Atlas.default()
+        self.device = device
+        self._is_set_up = False
 
-    if keep_intermediate_outputs:
-        mp.write_vtk_mesh(mesh, filename_prefix + "_original.vtk")
-    else:
-        os.remove(filename_prefix + "_transformed.vtk")
+    @property
+    def stages(self):
+        """All stages, in the order they run."""
+        return [self.preprocessor, self.segmenter, self.registerer, self.mesh_generator,
+                self.thickness_estimator, self.atlas_mapper, *self.biomarker_extractors]
 
-    return transformed_mesh
+    def setup(self):
+        """Load models. run_case() calls this when needed, so calling it directly is optional."""
+        if self._is_set_up:
+            return
+        self.device = self.device or default_device()
+        for stage in self.stages:
+            stage.setup(self.device)
+        self._is_set_up = True
+
+    def run_case(self, case: CaseInfo, output_dir=None, keep_intermediate_outputs=True) -> CaseArtifacts:
+        """
+        Process one case and return everything it produced.
+
+        If output_dir is given, the biomarker outputs are written to it, along with the intermediate outputs
+        if keep_intermediate_outputs is set. Files are written as soon as each stage finishes.
+        """
+        self.setup()
+        writer = _FlatLayoutWriter(output_dir, keep_intermediate_outputs)
+        result = CaseArtifacts(case=case, atlas=self.atlas)
+
+        image = io.read_image(case.input)
+        description = io.series_description(case.input, image)
+        if description is not None:
+            print(f"Laterality: {case.laterality}, Series description: {description}")
+
+        result.image = self.preprocessor.run(image, case)
+        writer.intermediate("in_image.nrrd", result.image)
+
+        print("Segmenting the cartilage")
+        result.probability = self.segmenter.run(result.image)
+        for s in STRUCTURES:
+            writer.intermediate(f"{s}_prob.nrrd", result.probability[s])
+
+        print("Registering the input image to the atlas")
+        result.registration = self.registerer.run(result.image, self.atlas.image)
+        writer.intermediate("resampling.tfm", result.registration.phi_AB)
+        writer.intermediate("modelling.tfm", result.registration.phi_BA)
+
+        print("Converting segmentation probability images to meshes")
+        for s in STRUCTURES:
+            result.mesh[s] = self.mesh_generator.run(result.probability[s])
+            writer.intermediate(f"{s}_mesh_patient.vtk", result.mesh[s])
+
+        print(f"Computing the thickness with {self.thickness_estimator.name}")
+        for s in STRUCTURES:
+            result.thickness[s] = self.thickness_estimator.run(
+                result.mesh[s], result.probability[s], result.registration, self.atlas, s)
+            writer.mesh_result(s, "outer", result.thickness[s])
+
+        print("Mapping thickness from patient meshes to the atlas")
+        for s in STRUCTURES:
+            result.atlas_mapped[s] = self.atlas_mapper.run(result.thickness[s].mesh, result.registration, self.atlas, s)
+            writer.mesh_result(s, "mapped_mesh", result.atlas_mapped[s])
+
+        print("Computing biomarkers")
+        for extractor in self.biomarker_extractors:
+            outputs = extractor.run(result)
+            result.biomarkers.update(outputs)
+            for filename, value in outputs.items():
+                writer.final(filename, value)
+
+        return result
 
 
-def preprocess(image, window_min_percentile=0.1, window_max_percentile=99.9, output_min=0.0, output_max=1.0):
-    image_array = itk.GetArrayViewFromImage(image)
-    win_min = float(np.percentile(image_array, window_min_percentile))
-    win_max = float(np.percentile(image_array, window_max_percentile))
-    result = itk.intensity_windowing_image_filter(image,
-                                                  window_minimum=win_min,
-                                                  window_maximum=win_max,
-                                                  output_minimum=output_min,
-                                                  output_maximum=output_max)
-    return result
+class _FlatLayoutWriter:
+    """Writes outputs into one directory, with the file names analysis_pipeline() has always used."""
+
+    def __init__(self, output_dir, keep_intermediate_outputs):
+        self.output_dir = output_dir
+        self.keep_intermediate_outputs = keep_intermediate_outputs
+        if output_dir is not None:
+            os.makedirs(output_dir, exist_ok=True)
+
+    def final(self, filename, value, compression=False):
+        if self.output_dir is not None:
+            io.write(value, os.path.join(self.output_dir, filename), compression=compression)
+
+    def intermediate(self, filename, value, compression=False):
+        if self.keep_intermediate_outputs:
+            self.final(filename, value, compression)
+
+    def mesh_result(self, structure, mesh_name, mesh_result):
+        """Write e.g. FC_outer.vtk, then the stage's other outputs as e.g. FC_inner.vtk."""
+        self.intermediate(f"{structure}_{mesh_name}.vtk", mesh_result.mesh)
+        for name, value in mesh_result.intermediates.items():
+            # stage intermediates such as thickness images are compressed, as they always have been
+            self.intermediate(f"{structure}_{name}{io.default_extension(value)}", value, compression=True)
 
 
-def into_canonical_orientation(image, flip_left_right):
-    """
-    Reorient the given image into the canonical orientation.
-
-    :param image: input image
-    :param flip_left_right: if True, flips the image left-right
-    :return: reoriented image
-    """
-    dicom_lps = itk.SpatialOrientationEnums.ValidCoordinateOrientations_ITK_COORDINATE_ORIENTATION_RAI
-    dicom_ras = itk.SpatialOrientationEnums.ValidCoordinateOrientations_ITK_COORDINATE_ORIENTATION_LPI
-    dicom_pir = itk.SpatialOrientationEnums.ValidCoordinateOrientations_ITK_COORDINATE_ORIENTATION_ASL
-    if flip_left_right:
-        image_dir = itk.array_from_matrix(image.GetDirection())
-        image_dir[0, :] *= -1  # flip left-right
-        image.SetDirection(itk.matrix_from_array(image_dir))
-    oriented_image = itk.orient_image_filter(
-        image,
-        use_image_direction=True,
-        # given_coordinate_orientation=dicom_lps,
-        # desired_coordinate_orientation=dicom_ras,
-        desired_coordinate_orientation=dicom_pir,  # atlas' orientation
-    )
-    return oriented_image
-
-
-def sample_distance_from_image(thickness_image, mesh):
-    num_points = mesh.GetNumberOfPoints()
-    thickness = np.zeros(num_points, dtype=np.float32)
-    for i in range(num_points):
-        point = mesh.GetPoint(i)
-        image_index = thickness_image.TransformPhysicalPointToIndex(point)
-        thickness[i] = thickness_image.GetPixel(image_index)
-
-    vtk_array = numpy_to_vtk(thickness, deep=True, array_type=vtk.VTK_FLOAT)
-    vtk_array.SetName("vertex_thickness")
-    mesh.GetPointData().AddArray(vtk_array)
-    return mesh
+@functools.cache
+def default_pipeline():
+    """The pipeline with all default stages, created once per process."""
+    return OAPipeline()
 
 
 def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_outputs):
@@ -99,106 +174,10 @@ def analysis_pipeline(input_path, output_path, laterality, keep_intermediate_out
 
     :param input_path: path to the input image file, or path to input directory containing DICOM image series.
     :param output_path: path to the desired directory for outputs.
+    :param laterality: "left" or "right"
+    :param keep_intermediate_outputs: also write images, transforms and meshes from intermediate steps
     """
-    in_image = itk.imread(input_path, pixel_type=itk.F)
-    if pathlib.Path(input_path).is_dir():  # DICOM series
-        namesGenerator = itk.GDCMSeriesFileNames.New()
-        namesGenerator.SetUseSeriesDetails(True)
-        namesGenerator.SetDirectory(input_path)
-        first_slice = itk.imread(namesGenerator.GetInputFileNames()[0])
-        metadata = first_slice.GetMetaDataDictionary()
-    else:
-        metadata = in_image.GetMetaDataDictionary()
-    if metadata.HasKey("0008|103e"):
-        print(f"Laterality: {laterality}, Series description: {metadata['0008|103e']}")
-
-    in_image = into_canonical_orientation(in_image, laterality == "right")  # simplifies mesh processing
-    in_image = preprocess(in_image)
-    os.makedirs(output_path, exist_ok=True)  # also holds intermediate results
-    if keep_intermediate_outputs:
-        itk.imwrite(in_image, os.path.join(output_path, "in_image.nrrd"))
-
-    print("Segmenting the cartilage")
-    obj = AnalysisObject()
-    FC_prob, TC_prob = obj.segment(in_image)
-    if keep_intermediate_outputs:
-        itk.imwrite(FC_prob, os.path.join(output_path, "FC_prob.nrrd"))
-        itk.imwrite(TC_prob, os.path.join(output_path, "TC_prob.nrrd"))
-
-    atlas = Atlas.default()
-    inner_mesh_fc_atlas = atlas.inner_mesh["FC"]
-    inner_mesh_tc_atlas = atlas.inner_mesh["TC"]
-
-    print("Registering the input image to the atlas")
-    model = get_unigradicon(weights_location=str(data.unigradicon_weights()))
-    in_image_D = in_image.astype(itk.D)
-    atlas_image_D = atlas.image.astype(itk.D)
-    phi_AB, phi_BA = itk_wrapper.register_pair(model, in_image_D, atlas_image_D, finetune_steps=2)
-    if keep_intermediate_outputs:
-        print("Saving registration results")
-        itk.transformwrite(phi_AB, os.path.join(output_path, "resampling.tfm"))
-        itk.transformwrite(phi_BA, os.path.join(output_path, "modelling.tfm"))
-
-    print("Converting segmentation probability images to meshes")
-    # Get mesh from itk image
-    fc_mesh_itk = mp.get_mesh_from_probability_map(FC_prob)
-    tc_mesh_itk = mp.get_mesh_from_probability_map(TC_prob)
-    fc_mesh = mp.itk_mesh_to_vtk_mesh(fc_mesh_itk)
-    tc_mesh = mp.itk_mesh_to_vtk_mesh(tc_mesh_itk)
-    if keep_intermediate_outputs:
-        mp.write_vtk_mesh(fc_mesh, output_path + "/FC_mesh_patient.vtk")
-        mp.write_vtk_mesh(tc_mesh, output_path + "/TC_mesh_patient.vtk")
-
-    thickness_via_mesh_splitting = True
-    if thickness_via_mesh_splitting:
-        print("Computing the thickness map via mesh splitting into inner and outer")
-        # Transform to atlas space for splitting
-        fc_mesh_atlas = transform_mesh(fc_mesh, phi_BA, output_path + "/FC_mesh", False)
-        tc_mesh_atlas = transform_mesh(tc_mesh, phi_BA, output_path + "/TC_mesh", False)
-        fc_inner_atlas, fc_outer_atlas = mp.get_split_mesh(fc_mesh_atlas, inner_mesh_fc_atlas, mesh_type='FC')
-        tc_inner_atlas, tc_outer_atlas = mp.get_split_mesh(tc_mesh_atlas, inner_mesh_tc_atlas, mesh_type='TC')
-
-        # Transform back to patient space for distance measuring
-        fc_inner_patient = transform_mesh(fc_inner_atlas, phi_AB, output_path + "/FC_mesh", False)
-        fc_outer_patient = transform_mesh(fc_outer_atlas, phi_AB, output_path + "/FC_mesh", False)
-        tc_inner_patient = transform_mesh(tc_inner_atlas, phi_AB, output_path + "/TC_mesh", False)
-        tc_outer_patient = transform_mesh(tc_outer_atlas, phi_AB, output_path + "/TC_mesh", False)
-        fc_inner, fc_mesh = mp.get_distance(fc_inner_patient, fc_outer_patient)
-        tc_inner, tc_mesh = mp.get_distance(tc_inner_patient, tc_outer_patient)
-        if keep_intermediate_outputs:
-            mp.write_vtk_mesh(fc_inner, output_path + "/FC_inner.vtk")
-            mp.write_vtk_mesh(tc_inner, output_path + "/TC_inner.vtk")
-    else:
-        print("Computing the thickness map via distance transformation from mask edges")
-        fc_thickness_image, fc_distance, fc_mask = compute_thickness(FC_prob)
-        tc_thickness_image, tc_distance, tc_mask = compute_thickness(TC_prob)
-        fc_mesh = sample_distance_from_image(fc_thickness_image, fc_mesh)
-        tc_mesh = sample_distance_from_image(tc_thickness_image, tc_mesh)
-        if keep_intermediate_outputs:
-            itk.imwrite(fc_thickness_image, os.path.join(output_path, "FC_thickness_image.nrrd"), compression=True)
-            itk.imwrite(tc_thickness_image, os.path.join(output_path, "TC_thickness_image.nrrd"), compression=True)
-
-    if keep_intermediate_outputs:
-        mp.write_vtk_mesh(fc_mesh, output_path + "/FC_outer.vtk")
-        mp.write_vtk_mesh(tc_mesh, output_path + "/TC_outer.vtk")
-
-    print("Transforming meshes into atlas space")
-    fc_mesh_atlas = transform_mesh(fc_mesh, phi_BA, output_path + "/FC_mesh", False)
-    tc_mesh_atlas = transform_mesh(tc_mesh, phi_BA, output_path + "/TC_mesh", False)
-    if keep_intermediate_outputs:
-        mp.write_vtk_mesh(fc_mesh_atlas, output_path + "/FC_mesh_atlas.vtk")
-        mp.write_vtk_mesh(tc_mesh_atlas, output_path + "/TC_mesh_atlas.vtk")
-
-    print("Mapping thickness from patient meshes to the atlas")
-    mapped_mesh_fc = mp.map_attributes(fc_mesh_atlas, inner_mesh_fc_atlas)
-    mapped_mesh_tc = mp.map_attributes(tc_mesh_atlas, inner_mesh_tc_atlas)
-    if keep_intermediate_outputs:
-        mp.write_vtk_mesh(mapped_mesh_fc, output_path + "/FC_mapped_mesh.vtk")
-        mp.write_vtk_mesh(mapped_mesh_tc, output_path + "/TC_mapped_mesh.vtk")
-
-    print("Projecting thickness to 2D")
-    thickness_3d_to_2d(mapped_mesh_fc, mesh_type='FC', output_filename=output_path + '/FC_thickness', atlas=atlas)
-    thickness_3d_to_2d(mapped_mesh_tc, mesh_type='TC', output_filename=output_path + '/TC_thickness', atlas=atlas)
+    default_pipeline().run_case(CaseInfo(input_path, laterality), output_path, keep_intermediate_outputs)
 
 
 if __name__ == "__main__":

@@ -93,6 +93,16 @@ To process one knee image (a file, or a directory with a DICOM series):
 oai-analysis IMAGE OUTPUT_DIR left
 ```
 
+From Python, `OAPipeline` loads the models once and can process many cases. Any stage can be replaced
+by passing an instance (see `oai_analysis/stages/`):
+```python
+from oai_analysis import OAPipeline, CaseInfo
+
+pipeline = OAPipeline()
+result = pipeline.run_case(CaseInfo("IMAGE", "left"), "OUTPUT_DIR")
+fc_thickness_map = result.biomarkers["FC_thickness.npy"]
+```
+
 To view the demo notebooks:
 ```
 cd notebooks

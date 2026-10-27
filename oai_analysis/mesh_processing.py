@@ -375,13 +375,32 @@ def get_mesh(itk_image, num_iterations=150):
     return mesh
 
 # To obtain mesh from itk image probability map
-def get_mesh_from_probability_map(image: itk.Image) -> itk.Mesh:
+def get_mesh_from_probability_map(image: itk.Image, iso_surface_value=0.5,
+                                  project_vertex_surface_distance_threshold=0.05) -> itk.Mesh:
     mesh = itk.cuberille_image_to_mesh_filter(image,
                                               generate_triangle_faces=True,
-                                              iso_surface_value=0.5,
+                                              iso_surface_value=iso_surface_value,
                                               project_vertices_to_iso_surface=True,
-                                              project_vertex_surface_distance_threshold=0.05)
+                                              project_vertex_surface_distance_threshold=project_vertex_surface_distance_threshold)
     return mesh
+
+
+def transform_mesh(mesh, transform):
+    """
+    Transform the input mesh using the provided transform, keeping its first point data array (the thickness).
+
+    :param mesh: input vtkPolyData
+    :param transform: The modelling transform to use (the inverse of image resampling transform)
+    :return: transformed mesh
+    """
+    itk_mesh = get_itk_mesh(mesh)
+    t_mesh = itk.transform_mesh_filter(itk_mesh, transform=transform)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, 'transformed.vtk')
+        itk.meshwrite(t_mesh, path, compression=True)
+        transformed_mesh = read_vtk_mesh(path)
+    transformed_mesh.GetPointData().AddArray(mesh.GetPointData().GetArray(0))  # transfer thickness
+    return transformed_mesh
 
 
 # To obtain inner and outer mesh splits given the mesh type

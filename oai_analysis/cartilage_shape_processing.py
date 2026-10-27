@@ -1,3 +1,4 @@
+import io
 import os
 
 import matplotlib.pyplot as plt
@@ -23,18 +24,15 @@ def __generate_mask(vertice, mask, interx, intery, startx, starty):
     return mask
 
 
-def __map_thickness_to_2D_projection(embedded, thickness, ninter=100, min_thickness=-1., fpth_np=None, fpth_png=None,
-                                     name=''):
+def thickness_grid(embedded, thickness, ninter=100, min_thickness=-1.):
     """
+    Interpolate per-vertex thickness onto a regular grid over the 2D embedding of the atlas mesh.
 
     :param embedded: numpy array, 2d embedded atlas mesh
     :param thickness: numpy array, thickness
     :param ninter: mask resolution
     :param min_thickness: the threshold on minumum of thickness
-    :param fpth_np: saving path of numpy array of 2d thickness map
-    :param fpth_png: saving path of 2d project image
-    :param name: projection name
-    :return:
+    :return: the grid (NaN outside the mesh) and its extent (xmin, xmax, ymin, ymax)
     """
 
     xmin, xmax, ymin, ymax = min(embedded[:, 0]), max(embedded[:, 0]), min(embedded[:, 1]), max(embedded[:, 1])
@@ -54,20 +52,51 @@ def __map_thickness_to_2D_projection(embedded, thickness, ninter=100, min_thickn
     zi = griddata((x, y), z, (xi, yi), method='linear')
     # zi[mask] = 100
     zi[mask] = np.nan
+    extent = (xmin - interx * 5, xmax + interx * 5, ymin - intery * 5, ymax + intery * 5)
+    return zi, extent
 
-    # zi now has the thickness, we can write this out as a numpy file
-    np.save(file=fpth_np, arr=zi)
 
-    plt.imshow(np.flipud(zi), extent=(xmin - interx * 5, xmax + interx * 5, ymin - intery * 5, ymax + intery * 5))
+def __plot_thickness_grid(zi, extent, name):
+    plt.imshow(np.flipud(zi), extent=extent)
     plt.axis('equal')
     plt.axis('off')
     plt.colorbar().ax.tick_params(labelsize=10)
     font = {'size': 10}
     plt.title(name, font)
+
+
+def thickness_grid_png(zi, extent, name=''):
+    """Render the thickness grid as a PNG image, returned as bytes."""
+    __plot_thickness_grid(zi, extent, name)
+    buffer = io.BytesIO()
+    plt.savefig(buffer, format='png', dpi=300)
+    plt.close('all')
+    return buffer.getvalue()
+
+
+def __map_thickness_to_2D_projection(embedded, thickness, ninter=100, min_thickness=-1., fpth_np=None, fpth_png=None,
+                                     name=''):
+    """
+
+    :param embedded: numpy array, 2d embedded atlas mesh
+    :param thickness: numpy array, thickness
+    :param ninter: mask resolution
+    :param min_thickness: the threshold on minumum of thickness
+    :param fpth_np: saving path of numpy array of 2d thickness map
+    :param fpth_png: saving path of 2d project image
+    :param name: projection name
+    :return:
+    """
+    zi, extent = thickness_grid(embedded, thickness, ninter, min_thickness)
+
+    # zi now has the thickness, we can write this out as a numpy file
+    np.save(file=fpth_np, arr=zi)
+
     if fpth_png is not None:
-        plt.savefig(fpth_png, dpi=300)
-        plt.close('all')
+        with open(fpth_png, 'wb') as f:
+            f.write(thickness_grid_png(zi, extent, name))
     else:
+        __plot_thickness_grid(zi, extent, name)
         plt.show()
         plt.clf()
 

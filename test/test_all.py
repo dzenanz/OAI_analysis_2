@@ -1,18 +1,18 @@
 import unittest
 
 import itk
-import oai_analysis.analysis_object
 import oai_analysis.registration
 from oai_analysis.data import test_data_dir as data_dir
 from oai_analysis import mesh_processing as mp
 from oai_analysis.atlas import Atlas
+from oai_analysis.pipeline import default_device
+from oai_analysis.stages import UNetSegmenter
 import numpy as np
 
 class TestOAIAnalysis(unittest.TestCase):
 
     def setUp(self):
         self.data = data_dir()
-        self.analysis_object = oai_analysis.analysis_object.AnalysisObject()
 
     def test_SegmentationCPU(self):
         input_image = itk.imread(self.data / "colab_case" / "image_preprocessed.nii.gz")
@@ -20,7 +20,10 @@ class TestOAIAnalysis(unittest.TestCase):
         correct_FC_segmentation = itk.imread(self.data / "colab_case" / "FC_probmap.nii.gz")
         correct_TC_segmentation = itk.imread(self.data / "colab_case" / "TC_probmap.nii.gz")
 
-        FC, TC = self.analysis_object.segment(input_image)
+        segmenter = UNetSegmenter()
+        segmenter.setup(default_device())
+        probability = segmenter.run(input_image)
+        FC, TC = probability["FC"], probability["TC"]
 
         print('Segmentation Done')
         print(FC.shape, TC.shape)
@@ -34,7 +37,7 @@ class TestOAIAnalysis(unittest.TestCase):
 
     def test_MeshThicknessCPU(self):
         input_image = itk.imread(self.data / "colab_case" / "image_preprocessed.nii.gz", itk.D)
-        atlas_image = self.analysis_object.atlas_image
+        atlas_image = Atlas.default().image
 
         correct_FC_segmentation = itk.imread(self.data / "colab_case" / "FC_probmap.nii.gz", itk.D)
         correct_TC_segmentation = itk.imread(self.data / "colab_case" / "TC_probmap.nii.gz", itk.D)
@@ -54,7 +57,7 @@ class TestOAIAnalysis(unittest.TestCase):
             )
             return warped_image
 
-        phi_AB = self.analysis_object.register(input_image)
+        phi_AB = oai_analysis.registration.ICON_Registration().register(input_image, atlas_image)
 
         warped_image_FC = deform_probmap(phi_AB, input_image, atlas_image, correct_FC_segmentation)
         warped_image_TC = deform_probmap(phi_AB, input_image, atlas_image, correct_TC_segmentation)
@@ -83,7 +86,7 @@ class TestOAIAnalysis(unittest.TestCase):
 
         correct_registration = itk.imread(self.data / "colab_case" / "avsm" / "inv_transform_to_atlas.nii.gz")
 
-        registration = self.analysis_object.register(input_image)
+        registration = oai_analysis.registration.ICON_Registration().register(input_image, Atlas.default().image)
 
         #registration object is an itk transform. Need to verify that it is correct in test, but it appears correct
         print(registration)
@@ -92,7 +95,7 @@ class TestOAIAnalysis(unittest.TestCase):
 class TestImports(unittest.TestCase):
 
     def test_ImportsCPU(self):
-        self.analysis_object = oai_analysis.analysis_object.AnalysisObject()
+        from oai_analysis import OAPipeline, CaseInfo
 
 class TestICONRegistration(unittest.TestCase):
     def setUp(self):

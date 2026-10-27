@@ -1,32 +1,20 @@
-import torch
+import warnings
 
 import oai_analysis.registration
-import oai_analysis.segmentation.segmenter
 from oai_analysis.atlas import Atlas
-from oai_analysis.data import models_dir
+from oai_analysis.pipeline import default_device
+from oai_analysis.stages.segmentation import UNetSegmenter
 
 
 class AnalysisObject:
-    def __init__(self):
-        if torch.cuda.is_available():
-            self.device = "cuda"
-        else:
-            print("WARNING: CUDA NOT AVAILABLE, FALLING BACK TO CPU")
-            self.device = "cpu"
+    """Deprecated: use OAPipeline, or the stages in oai_analysis.stages directly."""
 
-        ## Initialize segmenter
-        segmenter_config = dict(
-            ckpoint_path=str(models_dir() / "segmentation_model.pth.tar"),
-            training_config_file=str(models_dir() / "segmentation_train_config.pth.tar"),
-            device=self.device,
-            batch_size=4,
-            overlap_size=(16, 16, 8),
-            output_prob=True,
-            output_itk=True,
-        )
-        self.segmenter = oai_analysis.segmentation.segmenter.Segmenter3DInPatchClassWise(
-            mode="pred", config=segmenter_config
-        )
+    def __init__(self):
+        warnings.warn("AnalysisObject is deprecated; use OAPipeline or oai_analysis.stages instead",
+                      DeprecationWarning, stacklevel=2)
+        self.device = default_device()
+        self.segmenter = UNetSegmenter()
+        self.segmenter.setup(self.device)
 
         # The GradICON knee registerer is only created when register() is called:
         # the pipeline registers with uniGradICON instead.
@@ -37,8 +25,8 @@ class AnalysisObject:
         return Atlas.default().image
 
     def segment(self, preprocessed_image):
-        FC_probmap, TC_probmap = self.segmenter.segment(preprocessed_image, if_output_prob_map=True, if_output_itk=True)
-        return (FC_probmap, TC_probmap)
+        probability = self.segmenter.run(preprocessed_image)
+        return (probability["FC"], probability["TC"])
 
     def register(self, preprocessed_image):
         if self.registerer is None:

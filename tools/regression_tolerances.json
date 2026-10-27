@@ -1,0 +1,39 @@
+{
+  "_comment": [
+    "Limits for tools/compare_outputs.py; the first file name pattern that matches applies.",
+    "Measured on two runs of f198a2f (RTX 5060 Ti, 13 benchmark cases): preprocessing, segmentation and",
+    "patient-space meshes are bit-identical between runs, so they must match exactly. uniGradICON fine-tuning",
+    "is not deterministic, so everything after registration gets about 2x the largest run-to-run difference seen.",
+    "Distances and thicknesses are in mm."
+  ],
+  "in_image.nrrd": {
+    "max_abs_diff_max": 1e-6
+  },
+  "*_prob.nrrd": {
+    "max_abs_diff_max": 1e-6,
+    "dice_min": 0.9999
+  },
+  "*_mesh_patient.vtk": {
+    "points_rel_diff_max": 0,
+    "surface_max_dist_max": 1e-4
+  },
+  "*_mapped_mesh.vtk": {
+    "points_rel_diff_max": 0,
+    "surface_max_dist_max": 1e-4,
+    "scalar_mean_abs_diff_max": 0.08,
+    "scalar_p95_abs_diff_max": 0.3
+  },
+  "*.vtk": {
+    "points_rel_diff_max": 0.002,
+    "surface_mean_dist_max": 0.35,
+    "surface_max_dist_max": 3.0,
+    "scalar_mean_abs_diff_max": 0.1,
+    "scalar_p95_abs_diff_max": 0.5
+  },
+  "*_thickness.npy": {
+    "nan_mismatch_frac_max": 0.005,
+    "mean_abs_diff_max": 0.07,
+    "p95_abs_diff_max": 0.25,
+    "max_abs_diff_max": 5.0
+  }
+}

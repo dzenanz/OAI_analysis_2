@@ -597,6 +597,21 @@ The refactor needs a reference before anything moves.
   It prints a pass/fail table with tolerances.
 - Run current `main` (`f198a2f`, venv11) on the **12 cases** in `pipeline.py:__main__` from `O:\OAI` plus the `colab_case`, **twice**. The two runs measure GPU run-to-run noise (uniGradICON fine-tuning is not deterministic), which sets the tolerances. Store the result as `M:\Dev\Osteoarthritis\OAI_golden_f198a2f\` (outside git) along with timings.
 - Done when: one command regenerates outputs and prints a comparison against the golden set.
+
+**Status: done** (2026-10-26, branch `regression-baseline`).
+- `tools/run_baseline.py OUT --oai-dir O:/OAI [--cases …] [--compare-to REF]` runs the cases from `tools/benchmark_cases.json`. It records the commit, packages, GPU, per-case timings and failures in `OUT/run_info.json`. With `--compare-to`, it then writes `OUT/comparison.md` and exits non-zero on a failure.
+- `tools/compare_outputs.py REF TEST` compares images, meshes and 2D maps. The 2D maps are compared as numpy arrays rather than with ITK image comparison. Limits come from `tools/regression_tolerances.json`.
+- The golden set is `OAI_golden_f198a2f/run1` and `run2` (27 GB): 13/13 cases succeeded in each run, at about 4.6 min per case on the RTX 5060 Ti (about 1 h per run).
+- **Measured noise.** Preprocessing, segmentation and the patient-space meshes are **bit-identical** between the runs, so they must match exactly. Run-to-run variation starts at uniGradICON registration. Downstream of it, the largest differences between runs were:
+
+  | Output | Largest run-to-run difference (mm) |
+  |---|---|
+  | 2D thickness maps | 0.035 mean, 0.12 at the 95th percentile, 2.6 at one pixel |
+  | Thickness on the atlas mesh | 0.038 mean, 0.14 at the 95th percentile |
+
+  These differences set the tolerances at about 2× the largest value seen.
+- **Check against older outputs.** Comparing run1 with the Feb 2025 outputs (`OAI_results_2_2025`, older dependencies) correctly fails the exact-match stages. Probability maps differ by up to 0.0015 and patient-space meshes by up to 0.2 mm, from the Sep 2026 dependency update. All post-registration outputs are within the noise.
+- If tighter checks on the post-registration stages are wanted later, deterministic registration (4.8, `deterministic: true`) would allow them.
 - In Step 4 this tool becomes `oai-analysis compare PROJECT_A PROJECT_B`, which also works on the new layout. That is the reusable "compare to prior known-good runs" from Bea's notes, and the source for the reviewer-facing change log.
 
 ### Step 1: Package hygiene (M1.1a)

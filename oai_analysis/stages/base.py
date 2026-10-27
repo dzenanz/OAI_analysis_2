@@ -112,6 +112,7 @@ class CaseArtifacts:
     thickness: dict[str, MeshResult] = field(default_factory=dict)  # patient space
     atlas_mapped: dict[str, MeshResult] = field(default_factory=dict)  # atlas inner mesh with the patient's thickness
     biomarkers: dict[str, object] = field(default_factory=dict)  # outputs of the biomarker extractors, by file name
+    seconds: dict[str, float] = field(default_factory=dict)  # wall time per stage, including writing its outputs
 
     def atlas_thickness(self, structure: str) -> np.ndarray:
         """Thickness at each vertex of the atlas inner mesh."""

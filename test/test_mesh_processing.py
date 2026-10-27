@@ -103,3 +103,24 @@ def test_get_cell_centroid():
     trimesh_centroid = trimesh_get_cell_centroid(mesh)
 
     np.testing.assert_allclose(vtk_centroid, trimesh_centroid, atol=0.02)
+
+@pytest.mark.parametrize("num_iterations", [0, 150])
+def test_split_cell_ids_match_split_mesh(num_iterations):
+    from oai_analysis.atlas import Atlas
+
+    image = itk.imread(data_dir() / "colab_case" / "TC_probmap.nii.gz", itk.F)
+    mesh = mp.itk_mesh_to_vtk_mesh(mp.get_mesh_from_probability_map(image))
+    atlas_mesh = Atlas.default().inner_mesh["TC"]
+
+    inner_ids, outer_ids = mp.get_split_cell_ids(mesh, atlas_mesh, "TC", num_iterations=num_iterations)
+    inner, outer = mp.get_split_mesh(mesh, atlas_mesh, "TC", num_iterations=num_iterations)
+
+    assert len(np.intersect1d(inner_ids, outer_ids)) == 0
+    assert inner.GetNumberOfCells() == len(inner_ids) > 0
+    assert outer.GetNumberOfCells() == len(outer_ids) > 0
+    assert mesh.GetCellData().GetNumberOfArrays() == 0  # the input is not modified
+    if num_iterations == 0:  # without smoothing, the halves cut by cell id are the same meshes
+        for split, ids in ((inner, inner_ids), (outer, outer_ids)):
+            cut = mp.get_vtk_sub_mesh(mesh, ids)
+            np.testing.assert_array_equal(vtk.util.numpy_support.vtk_to_numpy(cut.GetPoints().GetData()),
+                                          vtk.util.numpy_support.vtk_to_numpy(split.GetPoints().GetData()))

@@ -230,6 +230,16 @@ def get_vtk_sub_mesh(input_mesh, inner_face_list):
 
 # For splitting the Tibial cartilage
 def split_tibial_cartilage_surface(mesh, mesh_normals, mesh_centroids):
+    inner_face_list, outer_face_list = tibial_face_lists(mesh_normals, mesh_centroids)
+
+    inner_mesh = get_vtk_sub_mesh(mesh, inner_face_list)
+    outer_mesh = get_vtk_sub_mesh(mesh, outer_face_list)
+
+    return inner_mesh, outer_mesh, inner_face_list, outer_face_list
+
+
+# Classify the faces of the Tibial cartilage into inner (bone side) and outer
+def tibial_face_lists(mesh_normals, mesh_centroids):
     mesh_centroids_normalized = (mesh_centroids - np.mean(mesh_centroids, axis=0)) / (
         np.max(mesh_centroids, axis=0) - np.min(mesh_centroids, axis=0)
     )
@@ -251,11 +261,7 @@ def split_tibial_cartilage_surface(mesh, mesh_normals, mesh_centroids):
 
     inner_face_list = np.where(inner_outer_label_list == -1)[0]
     outer_face_list = np.where(inner_outer_label_list == 1)[0]
-
-    inner_mesh = get_vtk_sub_mesh(mesh, inner_face_list)
-    outer_mesh = get_vtk_sub_mesh(mesh, outer_face_list)
-
-    return inner_mesh, outer_mesh, inner_face_list, outer_face_list
+    return inner_face_list, outer_face_list
 
 
 # Clusters the feature vectors and segments the mesh
@@ -276,6 +282,16 @@ def cluster_and_segment(mesh_centroids_normalized, face_normal_value, dot_output
 
 # For splitting the Femoral cartilage
 def split_femoral_cartilage_surface(mesh, face_normal, face_centroid, num_divisions=3):
+    inner_face_list, outer_face_list = femoral_face_lists(mesh, face_normal, face_centroid, num_divisions)
+
+    inner_mesh = get_vtk_sub_mesh(mesh, inner_face_list)
+    outer_mesh = get_vtk_sub_mesh(mesh, outer_face_list)
+
+    return inner_mesh, outer_mesh, inner_face_list, outer_face_list
+
+
+# Classify the faces of the Femoral cartilage into inner (bone side) and outer
+def femoral_face_lists(mesh, face_normal, face_centroid, num_divisions=3):
     mesh_centroids_normalized = (face_centroid - np.mean(face_centroid, axis=0)) / (
         np.max(face_centroid, axis=0) - np.min(face_centroid, axis=0)
     )
@@ -322,11 +338,7 @@ def split_femoral_cartilage_surface(mesh, face_normal, face_centroid, num_divisi
 
     inner_face_list = np.where(inner_outer_label_list == -1)[0]
     outer_face_list = np.where(inner_outer_label_list == 1)[0]
-
-    inner_mesh = get_vtk_sub_mesh(mesh, inner_face_list)
-    outer_mesh = get_vtk_sub_mesh(mesh, outer_face_list)
-
-    return inner_mesh, outer_mesh, inner_face_list, outer_face_list
+    return inner_face_list, outer_face_list
 
 
 # For smoothing the input mesh. Change number of iterations as per usecase.
@@ -405,39 +417,57 @@ def transform_mesh(mesh, transform):
 
 # To obtain inner and outer mesh splits given the mesh type
 def split_mesh(mesh, mesh_type="FC"):
+    inner_face_list, outer_face_list = split_mesh_face_lists(mesh, mesh_type)
+    inner_mesh = get_vtk_sub_mesh(mesh, inner_face_list)
+    outer_mesh = get_vtk_sub_mesh(mesh, outer_face_list)
+    return inner_mesh, outer_mesh
+
+
+# Indices of the inner and outer faces of the mesh, given the mesh type
+def split_mesh_face_lists(mesh, mesh_type="FC"):
     # Obtain the cell normals and centroids to be used for splittig the cartilage
     itk_mesh = get_itk_mesh(mesh)
     mesh_cell_normals = get_cell_normals(itk_mesh)
     mesh_cell_centroids = get_cell_centroid(itk_mesh)
 
-    # Split the mesh
     if mesh_type == "FC":
-        (
-            inner_mesh,
-            outer_mesh,
-            inner_face_list,
-            outer_face_list,
-        ) = split_femoral_cartilage_surface(
-            mesh, mesh_cell_normals, mesh_cell_centroids
-        )
+        return femoral_face_lists(mesh, mesh_cell_normals, mesh_cell_centroids)
     else:
-        (
-            inner_mesh,
-            outer_mesh,
-            inner_face_list,
-            outer_face_list,
-        ) = split_tibial_cartilage_surface(mesh, mesh_cell_normals, mesh_cell_centroids)
-
-    return inner_mesh, outer_mesh
+        return tibial_face_lists(mesh_cell_normals, mesh_cell_centroids)
 
 
-# Obtain the thickness of the input itk_image by creating a mesh and splitting it.
+# Split the cartilage surface (in atlas space) into inner and outer meshes.
 def get_split_mesh(vtk_mesh, atlas_mesh, mesh_type="FC", num_iterations=150, distance_threshold_mm=10.0):
     """
-    Takes the probability map obtained from the segmentation algorithm as an itk image.
-    Constructs a VTK mesh from it and returns the thickness between the inner and outer splitted mesh.
+    Removes small islands far from atlas_mesh, smooths the rest, and splits it into inner and outer surfaces.
     Takes as argument the type of mesh 'FC' or 'TC'.
-    atlas_mesh is used for island filtering - we keep islands close to it
+    Returns the inner and outer meshes, made from the smoothed mesh.
+    """
+    mesh = filter_islands_and_smooth(vtk_mesh, atlas_mesh, mesh_type, num_iterations, distance_threshold_mm)
+    return split_mesh(mesh, mesh_type)
+
+
+def get_split_cell_ids(vtk_mesh, atlas_mesh, mesh_type="FC", num_iterations=150, distance_threshold_mm=10.0):
+    """
+    Like get_split_mesh, but returns the ids of the inner and outer cells of vtk_mesh itself.
+    vtk_mesh can then be cut with get_vtk_sub_mesh, or a mesh with the same cells, e.g. one in another space.
+    """
+    tagged = vtk.vtkPolyData()
+    tagged.ShallowCopy(vtk_mesh)
+    cell_ids = ns.numpy_to_vtk(np.arange(vtk_mesh.GetNumberOfCells(), dtype=np.int64), deep=True)
+    cell_ids.SetName("original_cell_id")
+    tagged.GetCellData().AddArray(cell_ids)  # island filtering and smoothing pass cell data through
+
+    mesh = filter_islands_and_smooth(tagged, atlas_mesh, mesh_type, num_iterations, distance_threshold_mm)
+    inner_face_list, outer_face_list = split_mesh_face_lists(mesh, mesh_type)
+    original_ids = ns.vtk_to_numpy(mesh.GetCellData().GetArray("original_cell_id"))
+    return original_ids[inner_face_list], original_ids[outer_face_list]
+
+
+def filter_islands_and_smooth(vtk_mesh, atlas_mesh, mesh_type="FC", num_iterations=150, distance_threshold_mm=10.0):
+    """
+    Keeps the large islands (at least 1 for FC and 2 for TC), and the smaller ones close to atlas_mesh,
+    then smooths the result.
     """
     # Keep the largest 1 (FC) or 2 (TC) regions
     connect = vtk.vtkPolyDataConnectivityFilter()
@@ -487,12 +517,7 @@ def get_split_mesh(vtk_mesh, atlas_mesh, mesh_type="FC", num_iterations=150, dis
     cc = connect.GetOutput()
 
     # Smooth extracted mesh
-    mesh = smooth_mesh(cc, num_iterations=num_iterations)
-
-    # Split the mesh into inner and outer
-    inner_mesh, outer_mesh = split_mesh(mesh, mesh_type)
-
-    return inner_mesh, outer_mesh
+    return smooth_mesh(cc, num_iterations=num_iterations)
 
 
 # Map the attributes from the source mesh to target mesh (atlas mesh)

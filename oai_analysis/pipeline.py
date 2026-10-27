@@ -3,9 +3,11 @@ OAPipeline wires the stages together in their fixed order. It holds no algorithm
 
 analysis_pipeline() is the original entry point, kept with the same signature and output files.
 """
+import contextlib
 import functools
 import os
 import sys
+import time
 
 import torch
 
@@ -98,43 +100,58 @@ class OAPipeline:
         if description is not None:
             print(f"Laterality: {case.laterality}, Series description: {description}")
 
-        result.image = self.preprocessor.run(image, case)
-        writer.intermediate("in_image.nrrd", result.image)
+        with _timed(result, "preprocessor"):
+            result.image = self.preprocessor.run(image, case)
+            writer.intermediate("in_image.nrrd", result.image)
 
         print("Segmenting the cartilage")
-        result.probability = self.segmenter.run(result.image)
-        for s in STRUCTURES:
-            writer.intermediate(f"{s}_prob.nrrd", result.probability[s])
+        with _timed(result, "segmenter"):
+            result.probability = self.segmenter.run(result.image)
+            for s in STRUCTURES:
+                writer.intermediate(f"{s}_prob.nrrd", result.probability[s])
 
         print("Registering the input image to the atlas")
-        result.registration = self.registerer.run(result.image, self.atlas.image)
-        writer.intermediate("resampling.tfm", result.registration.phi_AB)
-        writer.intermediate("modelling.tfm", result.registration.phi_BA)
+        with _timed(result, "registerer"):
+            result.registration = self.registerer.run(result.image, self.atlas.image)
+            writer.intermediate("resampling.tfm", result.registration.phi_AB)
+            writer.intermediate("modelling.tfm", result.registration.phi_BA)
 
         print("Converting segmentation probability images to meshes")
-        for s in STRUCTURES:
-            result.mesh[s] = self.mesh_generator.run(result.probability[s])
-            writer.intermediate(f"{s}_mesh_patient.vtk", result.mesh[s])
+        with _timed(result, "mesh_generator"):
+            for s in STRUCTURES:
+                result.mesh[s] = self.mesh_generator.run(result.probability[s])
+                writer.intermediate(f"{s}_mesh_patient.vtk", result.mesh[s])
 
         print(f"Computing the thickness with {self.thickness_estimator.name}")
-        for s in STRUCTURES:
-            result.thickness[s] = self.thickness_estimator.run(
-                result.mesh[s], result.probability[s], result.registration, self.atlas, s)
-            writer.mesh_result(s, "outer", result.thickness[s])
+        with _timed(result, "thickness_estimator"):
+            for s in STRUCTURES:
+                result.thickness[s] = self.thickness_estimator.run(
+                    result.mesh[s], result.probability[s], result.registration, self.atlas, s)
+                writer.mesh_result(s, "outer", result.thickness[s])
 
         print("Mapping thickness from patient meshes to the atlas")
-        for s in STRUCTURES:
-            result.atlas_mapped[s] = self.atlas_mapper.run(result.thickness[s].mesh, result.registration, self.atlas, s)
-            writer.mesh_result(s, "mapped_mesh", result.atlas_mapped[s])
+        with _timed(result, "atlas_mapper"):
+            for s in STRUCTURES:
+                result.atlas_mapped[s] = self.atlas_mapper.run(
+                    result.thickness[s].mesh, result.registration, self.atlas, s)
+                writer.mesh_result(s, "mapped_mesh", result.atlas_mapped[s])
 
         print("Computing biomarkers")
         for extractor in self.biomarker_extractors:
-            outputs = extractor.run(result)
-            result.biomarkers.update(outputs)
-            for filename, value in outputs.items():
-                writer.final(filename, value)
+            with _timed(result, extractor.name):
+                outputs = extractor.run(result)
+                result.biomarkers.update(outputs)
+                for filename, value in outputs.items():
+                    writer.final(filename, value)
 
         return result
+
+
+@contextlib.contextmanager
+def _timed(result, stage):
+    start = time.perf_counter()
+    yield
+    result.seconds[stage] = time.perf_counter() - start
 
 
 class _FlatLayoutWriter:

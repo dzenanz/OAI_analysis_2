@@ -25,13 +25,32 @@ PACKAGE_DIR = REPO_DIR / "oai_analysis"
 CASES_FILE = pathlib.Path(__file__).resolve().parent / "benchmark_cases.json"
 
 
-def import_analysis_pipeline():
-    """Return analysis_pipeline() and the directory that bundled case paths are relative to."""
+def import_analysis_pipeline(back_mapping=None):
+    """
+    Return run(input, output_dir, laterality) and the directory that bundled case paths are relative to.
+    run() returns the seconds per stage, when the code reports them.
+    """
+    try:
+        from oai_analysis.data import test_data_dir
+        from oai_analysis.pipeline import OAPipeline
+        from oai_analysis.stages import CaseInfo, MeshSplittingThickness
+    except ImportError:
+        pass
+    else:
+        thickness = MeshSplittingThickness(back_mapping=back_mapping) if back_mapping else None
+        pipeline = OAPipeline(thickness_estimator=thickness)
+
+        def run(input_path, output_dir, laterality):
+            result = pipeline.run_case(CaseInfo(input_path, laterality), output_dir, keep_intermediate_outputs=True)
+            return {stage: round(seconds, 1) for stage, seconds in result.seconds.items()}
+
+        return run, test_data_dir().parent
+
+    if back_mapping:
+        sys.exit("--back-mapping needs a version with oai_analysis.pipeline.OAPipeline")
     try:
         from oai_analysis.data import test_data_dir
         from oai_analysis.pipeline import analysis_pipeline
-
-        return analysis_pipeline, test_data_dir().parent
     except ImportError:
         # pipeline.py up to f198a2f only works with oai_analysis/ on sys.path,
         # and uniGradICON loads its weights from ./network_weights, relative to the working directory
@@ -39,7 +58,14 @@ def import_analysis_pipeline():
         os.chdir(PACKAGE_DIR)
         from pipeline import analysis_pipeline
 
-        return analysis_pipeline, PACKAGE_DIR / "data"
+        bundled_data_dir = PACKAGE_DIR / "data"
+    else:
+        bundled_data_dir = test_data_dir().parent
+
+    def run(input_path, output_dir, laterality):
+        analysis_pipeline(input_path, output_dir, laterality, keep_intermediate_outputs=True)
+
+    return run, bundled_data_dir
 
 
 def git_info():
@@ -90,11 +116,13 @@ def main():
     parser.add_argument("--cases", help="Comma-separated subset of case directory names, e.g. 9016304_0M_left")
     parser.add_argument("--compare-to", type=pathlib.Path,
                         help="Reference output directory; run tools/compare_outputs.py against it afterwards")
+    parser.add_argument("--back-mapping", choices=["cell_ids", "transform"],
+                        help="MeshSplittingThickness back_mapping (default: the pipeline's default)")
     args = parser.parse_args()
 
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    analysis_pipeline, bundled_data_dir = import_analysis_pipeline()
+    run_pipeline, bundled_data_dir = import_analysis_pipeline(args.back_mapping)
     cases = select_cases(args, bundled_data_dir)
 
     run_info = {
@@ -110,12 +138,12 @@ def main():
         print(f"\nProcessing {case_dir_name}: {case['input']}", flush=True)
         start = time.perf_counter()
         try:
-            analysis_pipeline(case["input"], str(output_dir / case_dir_name), case["laterality"],
-                              keep_intermediate_outputs=True)
+            stage_seconds = run_pipeline(case["input"], str(output_dir / case_dir_name), case["laterality"])
             status = "succeeded"
             error = None
         except Exception:
             status = "failed"
+            stage_seconds = None
             error = traceback.format_exc()
             print(error, flush=True)
         run_info["cases"][case_dir_name] = {
@@ -123,6 +151,7 @@ def main():
             "laterality": case["laterality"],
             "status": status,
             "duration_s": round(time.perf_counter() - start, 1),
+            "stage_seconds": stage_seconds,
             "error": error,
         }
         run_info["finished"] = datetime.datetime.now().astimezone().isoformat()

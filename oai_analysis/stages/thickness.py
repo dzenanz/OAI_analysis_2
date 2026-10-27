@@ -12,21 +12,37 @@ from oai_analysis.stages.base import MeshResult, ThicknessEstimator
 
 @dataclass
 class MeshSplittingThickness(ThicknessEstimator):
-    """Split the surface into inner/outer in atlas space; measure inner-outer distance in patient space."""
+    """
+    Split the surface into inner/outer in atlas space; measure inner-outer distance in patient space.
+
+    back_mapping chooses how the split gets back to patient space:
+    "cell_ids" cuts the halves out of the original patient mesh, by the ids of the cells in each half;
+    "transform" (version 1) transforms the halves of the smoothed atlas-space mesh back.
+    """
 
     name: ClassVar[str] = "mesh_splitting"
+    version: ClassVar[str] = "2"
     smoothing_iterations: int = 150
     island_distance_threshold_mm: float = 10.0
+    back_mapping: str = "cell_ids"
+
+    def __post_init__(self):
+        if self.back_mapping not in ("cell_ids", "transform"):
+            raise ValueError(f"back_mapping must be 'cell_ids' or 'transform', not {self.back_mapping!r}")
 
     def run(self, mesh, probability, registration, atlas, structure):
-        mesh_atlas = mp.transform_mesh(mesh, registration.phi_BA)
-        inner_atlas, outer_atlas = mp.get_split_mesh(
-            mesh_atlas, atlas.inner_mesh[structure], mesh_type=structure,
-            num_iterations=self.smoothing_iterations,
-            distance_threshold_mm=self.island_distance_threshold_mm,
-        )
-        inner = mp.transform_mesh(inner_atlas, registration.phi_AB)
-        outer = mp.transform_mesh(outer_atlas, registration.phi_AB)
+        mesh_atlas = mp.transform_mesh(mesh, registration.phi_BA)  # keeps the order of the cells
+        split_args = dict(atlas_mesh=atlas.inner_mesh[structure], mesh_type=structure,
+                          num_iterations=self.smoothing_iterations,
+                          distance_threshold_mm=self.island_distance_threshold_mm)
+        if self.back_mapping == "cell_ids":
+            inner_ids, outer_ids = mp.get_split_cell_ids(mesh_atlas, **split_args)
+            inner = mp.get_vtk_sub_mesh(mesh, inner_ids)
+            outer = mp.get_vtk_sub_mesh(mesh, outer_ids)
+        else:
+            inner_atlas, outer_atlas = mp.get_split_mesh(mesh_atlas, **split_args)
+            inner = mp.transform_mesh(inner_atlas, registration.phi_AB)
+            outer = mp.transform_mesh(outer_atlas, registration.phi_AB)
         inner_with_thickness, outer_with_thickness = mp.get_distance(inner, outer)
         return MeshResult(outer_with_thickness, intermediates={"inner": inner_with_thickness})
 

@@ -32,7 +32,7 @@ def series_description(path, image=None) -> str | None:
 
 
 def write(obj, path, compression=False):
-    """Write an output, choosing the writer by the object's type. `compression` applies to images."""
+    """Write an output, choosing the writer by the object's type. `compression` applies to images and transforms."""
     path = str(path)
     if isinstance(obj, bytes):
         Path(path).write_bytes(obj)
@@ -43,7 +43,8 @@ def write(obj, path, compression=False):
     elif isinstance(obj, itk.Image):
         itk.imwrite(obj, path, compression=compression)
     elif isinstance(obj, itk.Transform):
-        itk.transformwrite(obj, path)
+        # HDF5 cannot compress an empty parameter array, e.g. of an identity transform
+        itk.transformwrite(obj, path, compression=compression and obj.GetNumberOfParameters() > 0)
     else:
         raise TypeError(f"Do not know how to write {type(obj).__name__} to {path}")
 
@@ -59,3 +60,30 @@ def default_extension(obj) -> str:
     if isinstance(obj, itk.Transform):
         return ".tfm"
     raise TypeError(f"No default extension for {type(obj).__name__}")
+
+
+IMAGE_FORMATS = (".nrrd", ".nii.gz")
+TRANSFORM_FORMATS = (".h5", ".tfm")
+
+
+def extension(obj, image_format=".nrrd", transform_format=".h5") -> str:
+    """The extension for an output of this type, with the formats chosen for images and transforms."""
+    if isinstance(obj, itk.Image):
+        return image_format
+    if isinstance(obj, itk.Transform):
+        return transform_format
+    return default_extension(obj)
+
+
+def read(path):
+    """Read an output written by write(), choosing the reader by the file's extension."""
+    path = str(path)
+    if path.endswith((".nrrd", ".nii.gz", ".nii")):
+        return itk.imread(path)
+    if path.endswith((".h5", ".tfm")):
+        return itk.transformread(path)[0]
+    if path.endswith(".vtk"):
+        return mp.read_vtk_mesh(path)
+    if path.endswith(".npy"):
+        return np.load(path)
+    return Path(path).read_bytes()

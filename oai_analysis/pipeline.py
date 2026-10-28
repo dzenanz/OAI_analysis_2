@@ -8,11 +8,12 @@ import functools
 import os
 import sys
 import time
+from dataclasses import dataclass, field
 
 import torch
 
 from oai_analysis import config, data, io
-from oai_analysis.atlas import STRUCTURES, Atlas
+from oai_analysis.atlas import DEFAULT_ATLAS_NAME, STRUCTURES, Atlas
 from oai_analysis.stages import (
     AtlasMapper,
     BiomarkerExtractor,
@@ -21,11 +22,14 @@ from oai_analysis.stages import (
     ClosestPointAtlasMapper,
     CuberilleMeshGenerator,
     MeshGenerator,
+    MeshResult,
     MeshSplittingThickness,
     OAIPreprocessor,
     Preprocessor,
+    RegistrationResult,
     Registerer,
     Segmenter,
+    Stage,
     ThicknessEstimator,
     ThicknessMap2D,
     UNetSegmenter,
@@ -107,6 +111,11 @@ class OAPipeline:
         }
 
     @property
+    def atlas_name(self) -> str:
+        """The name of the atlas, without loading it."""
+        return self._atlas.name if self._atlas is not None else DEFAULT_ATLAS_NAME
+
+    @property
     def atlas(self) -> Atlas:
         if self._atlas is None:  # loaded on first use, so that creating a pipeline is cheap
             self._atlas = Atlas.default()
@@ -115,8 +124,16 @@ class OAPipeline:
     @property
     def stages(self):
         """All stages, in the order they run."""
-        return [self.preprocessor, self.segmenter, self.registerer, self.mesh_generator,
-                self.thickness_estimator, self.atlas_mapper, *self.biomarker_extractors]
+        return [step.stage for step in self.steps()]
+
+    def steps(self) -> list["Step"]:
+        """The steps of a case, in the order they run: one per stage, and one per biomarker extractor."""
+        steps = [Step(name, getattr(self, attribute), inputs, f"{i:02d}_{name}", description)
+                 for i, (name, (attribute, inputs, description)) in enumerate(STEPS.items(), start=1)]
+        biomarkers_folder = f"{len(STEPS) + 1:02d}_biomarkers"
+        steps += [Step(f"biomarkers/{e.name}", e, tuple(e.requires), f"{biomarkers_folder}/{e.name}",
+                       f'biomarker "{e.name}"') for e in self.biomarker_extractors]
+        return steps
 
     def setup(self):
         """Load models. run_case() calls this when needed, so calling it directly is optional."""
@@ -137,57 +154,104 @@ class OAPipeline:
         self.setup()
         writer = _FlatLayoutWriter(output_dir, keep_intermediate_outputs)
         result = CaseArtifacts(case=case, atlas=self.atlas)
-
-        image = io.read_image(case.input)
-        description = io.series_description(case.input, image)
-        if description is not None:
-            print(f"Laterality: {case.laterality}, Series description: {description}")
-
-        with _timed(result, "preprocessor"):
-            result.image = self.preprocessor.run(image, case)
-            writer.intermediate("in_image.nrrd", result.image)
-
-        print("Segmenting the cartilage")
-        with _timed(result, "segmenter"):
-            result.probability = self.segmenter.run(result.image)
-            for s in STRUCTURES:
-                writer.intermediate(f"{s}_prob.nrrd", result.probability[s])
-
-        print("Registering the input image to the atlas")
-        with _timed(result, "registerer"):
-            result.registration = self.registerer.run(result.image, self.atlas.image)
-            writer.intermediate("resampling.tfm", result.registration.phi_AB)
-            writer.intermediate("modelling.tfm", result.registration.phi_BA)
-
-        print("Converting segmentation probability images to meshes")
-        with _timed(result, "mesh_generator"):
-            for s in STRUCTURES:
-                result.mesh[s] = self.mesh_generator.run(result.probability[s])
-                writer.intermediate(f"{s}_mesh_patient.vtk", result.mesh[s])
-
-        print(f"Computing the thickness with {self.thickness_estimator.name}")
-        with _timed(result, "thickness_estimator"):
-            for s in STRUCTURES:
-                result.thickness[s] = self.thickness_estimator.run(
-                    result.mesh[s], result.probability[s], result.registration, self.atlas, s)
-                writer.mesh_result(s, "outer", result.thickness[s])
-
-        print("Mapping thickness from patient meshes to the atlas")
-        with _timed(result, "atlas_mapper"):
-            for s in STRUCTURES:
-                result.atlas_mapped[s] = self.atlas_mapper.run(
-                    result.thickness[s].mesh, result.registration, self.atlas, s)
-                writer.mesh_result(s, "mapped_mesh", result.atlas_mapped[s])
-
-        print("Computing biomarkers")
-        for extractor in self.biomarker_extractors:
-            with _timed(result, extractor.name):
-                outputs = extractor.run(result)
-                result.biomarkers.update(outputs)
-                for filename, value in outputs.items():
-                    writer.final(filename, value)
-
+        for step in self.steps():
+            with _timed(result, step.name):
+                writer.write(step, self.run_step(step, result))
         return result
+
+    def run_step(self, step: "Step", result: CaseArtifacts) -> "StepOutputs":
+        """Run one step, reading its inputs from result and storing its outputs in it."""
+        case = result.case
+        match step.name:
+            case "preprocess":
+                image = io.read_image(case.input)
+                description = io.series_description(case.input, image)
+                if description is not None:
+                    print(f"Laterality: {case.laterality}, Series description: {description}")
+                result.image = self.preprocessor.run(image, case)
+                return StepOutputs({"image": result.image})
+            case "segment":
+                print("Segmenting the cartilage")
+                result.probability = self.segmenter.run(result.image)
+                return StepOutputs({f"{s}_prob": result.probability[s] for s in STRUCTURES})
+            case "register":
+                print("Registering the input image to the atlas")
+                result.registration = self.registerer.run(result.image, self.atlas.image)
+                return StepOutputs({"phi_AB": result.registration.phi_AB, "phi_BA": result.registration.phi_BA})
+            case "mesh":
+                print("Converting segmentation probability images to meshes")
+                for s in STRUCTURES:
+                    result.mesh[s] = self.mesh_generator.run(result.probability[s])
+                return StepOutputs({f"{s}_mesh": result.mesh[s] for s in STRUCTURES})
+            case "thickness":
+                print(f"Computing the thickness with {self.thickness_estimator.name}")
+                for s in STRUCTURES:
+                    result.thickness[s] = self.thickness_estimator.run(
+                        result.mesh[s], result.probability[s], result.registration, self.atlas, s)
+                return _mesh_results("thickness", result.thickness)
+            case "atlas_map":
+                print("Mapping thickness from patient meshes to the atlas")
+                for s in STRUCTURES:
+                    result.atlas_mapped[s] = self.atlas_mapper.run(
+                        result.thickness[s].mesh, result.registration, self.atlas, s)
+                return _mesh_results("atlas", result.atlas_mapped)
+            case _:
+                print(f"Computing the biomarker {step.stage.name}")
+                outputs = step.stage.run(result)
+                result.biomarkers.update(outputs)
+                return StepOutputs(outputs)
+
+    def load_step(self, step: "Step", result: CaseArtifacts, files: dict):
+        """Store the outputs of an earlier run of a step in result: the reverse of run_step(), from files by name."""
+        values = {name: io.read(path) for name, path in files.items()}
+        match step.name:
+            case "preprocess":
+                result.image = values["image"]
+            case "segment":
+                result.probability = {s: values[f"{s}_prob"] for s in STRUCTURES}
+            case "register":
+                result.registration = RegistrationResult(values["phi_AB"], values["phi_BA"])
+            case "mesh":
+                result.mesh = {s: values[f"{s}_mesh"] for s in STRUCTURES}
+            case "thickness":
+                result.thickness = {s: MeshResult(values[f"{s}_thickness"]) for s in STRUCTURES}
+            case "atlas_map":
+                result.atlas_mapped = {s: MeshResult(values[f"{s}_atlas"]) for s in STRUCTURES}
+            case _:
+                result.biomarkers.update(values)
+
+
+# step name: (OAPipeline attribute holding its stage, the steps whose outputs it reads, plain-English description)
+STEPS = {
+    "preprocess": ("preprocessor", (), "preprocessing"),
+    "segment": ("segmenter", ("preprocess",), "segmentation"),
+    "register": ("registerer", ("preprocess",), "registration"),
+    "mesh": ("mesh_generator", ("segment",), "mesh generation"),
+    "thickness": ("thickness_estimator", ("mesh", "segment", "register"), "thickness measurement"),
+    "atlas_map": ("atlas_mapper", ("thickness", "register"), "mapping to the atlas"),
+}
+
+
+@dataclass(frozen=True)
+class Step:
+    """One step of a case: a stage applied to every structure, or one biomarker extractor."""
+    name: str  # e.g. "segment" or "biomarkers/thickness_map_2d"
+    stage: Stage
+    inputs: tuple[str, ...]  # the steps whose outputs it reads
+    folder: str  # where a project keeps its outputs, relative to the case folder
+    description: str  # plain English, for statuses and summaries
+
+
+@dataclass
+class StepOutputs:
+    outputs: dict[str, object]  # by name, e.g. "FC_prob"; later steps read these. Biomarker names are file names.
+    intermediates: dict[str, object] = field(default_factory=dict)  # other outputs worth looking at
+
+
+def _mesh_results(name, results):
+    """The outputs of a step that produces a MeshResult per structure, e.g. FC_thickness and FC_inner."""
+    return StepOutputs({f"{s}_{name}": r.mesh for s, r in results.items()},
+                       {f"{s}_{key}": value for s, r in results.items() for key, value in r.intermediates.items()})
 
 
 @contextlib.contextmanager
@@ -200,26 +264,35 @@ def _timed(result, stage):
 class _FlatLayoutWriter:
     """Writes outputs into one directory, with the file names analysis_pipeline() has always used."""
 
+    NAMES = {
+        "image": "in_image.nrrd", "phi_AB": "resampling.tfm", "phi_BA": "modelling.tfm",
+        **{f"{s}_{name}": f"{s}_{file_name}" for s in STRUCTURES for name, file_name in (
+            ("prob", "prob.nrrd"), ("mesh", "mesh_patient.vtk"), ("thickness", "outer.vtk"),
+            ("atlas", "mapped_mesh.vtk"))},
+    }
+
     def __init__(self, output_dir, keep_intermediate_outputs):
         self.output_dir = output_dir
         self.keep_intermediate_outputs = keep_intermediate_outputs
         if output_dir is not None:
             os.makedirs(output_dir, exist_ok=True)
 
-    def final(self, filename, value, compression=False):
+    def write(self, step, outputs):
+        if step.stage.kind == "biomarker_extractor":  # the final results, always written
+            for filename, value in outputs.outputs.items():
+                self._write(filename, value)
+            return
+        if not self.keep_intermediate_outputs:
+            return
+        for name, value in outputs.outputs.items():
+            self._write(self.NAMES[name], value)
+        for name, value in outputs.intermediates.items():
+            # stage intermediates such as thickness images are compressed, as they always have been
+            self._write(f"{name}{io.default_extension(value)}", value, compression=True)
+
+    def _write(self, filename, value, compression=False):
         if self.output_dir is not None:
             io.write(value, os.path.join(self.output_dir, filename), compression=compression)
-
-    def intermediate(self, filename, value, compression=False):
-        if self.keep_intermediate_outputs:
-            self.final(filename, value, compression)
-
-    def mesh_result(self, structure, mesh_name, mesh_result):
-        """Write e.g. FC_outer.vtk, then the stage's other outputs as e.g. FC_inner.vtk."""
-        self.intermediate(f"{structure}_{mesh_name}.vtk", mesh_result.mesh)
-        for name, value in mesh_result.intermediates.items():
-            # stage intermediates such as thickness images are compressed, as they always have been
-            self.intermediate(f"{structure}_{name}{io.default_extension(value)}", value, compression=True)
 
 
 @functools.cache

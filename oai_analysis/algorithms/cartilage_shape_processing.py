@@ -2,6 +2,7 @@ import io
 import os
 
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import numpy as np
 import vtk
 from scipy.interpolate import griddata
@@ -56,21 +57,27 @@ def thickness_grid(embedded, thickness, ninter=100, min_thickness=-1.):
     return zi, extent
 
 
+def _draw_thickness_grid(axes, zi, extent, name):
+    image = axes.imshow(np.flipud(zi), extent=extent)
+    axes.axis('equal')
+    axes.axis('off')
+    axes.figure.colorbar(image, ax=axes).ax.tick_params(labelsize=10)
+    axes.set_title(name, {'size': 10})
+
+
 def __plot_thickness_grid(zi, extent, name):
-    plt.imshow(np.flipud(zi), extent=extent)
-    plt.axis('equal')
-    plt.axis('off')
-    plt.colorbar().ax.tick_params(labelsize=10)
-    font = {'size': 10}
-    plt.title(name, font)
+    _draw_thickness_grid(plt.gca(), zi, extent, name)
 
 
 def thickness_grid_png(zi, extent, name=''):
-    """Render the thickness grid as a PNG image, returned as bytes."""
-    __plot_thickness_grid(zi, extent, name)
+    """
+    Render the thickness grid as a PNG image, returned as bytes.
+    It uses no pyplot, so no GUI toolkit objects are created (Tk aborts the process when another thread deletes them).
+    """
+    figure = Figure()
+    _draw_thickness_grid(figure.add_subplot(), zi, extent, name)
     buffer = io.BytesIO()
-    plt.savefig(buffer, format='png', dpi=300)
-    plt.close('all')
+    figure.savefig(buffer, format='png', dpi=300)
     return buffer.getvalue()
 
 

@@ -22,6 +22,9 @@ class UniGradICONRegisterer(Registerer):
         # icon_registration places the network on its own configured device
         self._model = get_unigradicon(weights_location=str(data.unigradicon_weights()))
 
+    def weights(self):
+        return {"unigradicon1.0/Step_2_final.trch": f"sha256:{data.unigradicon_sha256}"}
+
     def run(self, moving: itk.Image, fixed: itk.Image) -> RegistrationResult:
         phi_AB, phi_BA = itk_wrapper.register_pair(self._model, moving.astype(itk.D), fixed.astype(itk.D),
                                                    finetune_steps=self.finetune_steps)

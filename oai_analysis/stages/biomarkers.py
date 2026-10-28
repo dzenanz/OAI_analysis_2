@@ -12,6 +12,7 @@ class ThicknessMap2D(BiomarkerExtractor):
     """Thickness on the atlas, interpolated over the atlas' 2D embedding: an array and a picture per structure."""
 
     name: ClassVar[str] = "thickness_map_2d"
+    requires: ClassVar[tuple[str, ...]] = ("atlas_map",)
     grid_resolution: int = 300
 
     def run(self, case: CaseArtifacts) -> dict[str, object]:

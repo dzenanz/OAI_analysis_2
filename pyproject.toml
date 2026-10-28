@@ -43,6 +43,7 @@ dependencies = [
   "scikit-image>=0.26,<1",
   "scikit-learn>=1.9.1,<2",
   "pyyaml>=6,<7",
+  "pyarrow>=17",
 ]
 
 [project.optional-dependencies]

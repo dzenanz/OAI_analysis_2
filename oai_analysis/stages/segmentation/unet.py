@@ -3,7 +3,7 @@ from typing import ClassVar
 
 import itk
 
-from oai_analysis.data import models_dir
+from oai_analysis.data import models_dir, models_sha256
 from oai_analysis.registry import register
 from oai_analysis.stages.segmentation.segmenter import Segmenter3DInPatchClassWise
 from oai_analysis.stages.base import Segmenter
@@ -29,6 +29,9 @@ class UNetSegmenter(Segmenter):
             output_itk=True,
         ))
         self._segmenter.pred_setup()
+
+    def weights(self):
+        return {"oai-analysis-models.tar.gz": f"sha256:{models_sha256}"}
 
     def run(self, image: itk.Image) -> dict[str, itk.Image]:
         FC_prob, TC_prob = self._segmenter.segment(image, if_output_prob_map=True, if_output_itk=True)

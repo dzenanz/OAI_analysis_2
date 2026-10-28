@@ -51,6 +51,10 @@ class Stage(ABC):
     def setup(self, device: str) -> None:
         """Load heavy resources (networks, weights). Called once, before the first case. Default: nothing."""
 
+    def weights(self) -> dict[str, str]:
+        """The files of trained weights the stage uses, with their hashes, e.g. {"model.pth": "sha256:..."}."""
+        return {}
+
 
 @dataclass
 class RegistrationResult:
@@ -134,6 +138,8 @@ class CaseArtifacts:
 
 class BiomarkerExtractor(Stage):
     kind: ClassVar[str] = "biomarker_extractor"
+    # the steps whose outputs run() reads; a project loads or reruns only these before rerunning the extractor
+    requires: ClassVar[tuple[str, ...]] = ("preprocess", "segment", "register", "mesh", "thickness", "atlas_map")
 
     @abstractmethod
     def run(self, case: CaseArtifacts) -> dict[str, object]:

@@ -40,7 +40,8 @@ class CaseInfo:
 class Stage(ABC):
     """Base for every pipeline stage."""
 
-    name: ClassVar[str]  # short identifier, e.g. "unigradicon"
+    kind: ClassVar[str]  # which pipeline slot the stage fills, e.g. "registerer"; set by each interface below
+    name: ClassVar[str]  # short identifier, unique within its kind, e.g. "unigradicon"
     version: ClassVar[str] = "1"  # bump whenever the implementation's output changes
 
     def params(self) -> dict:
@@ -64,29 +65,39 @@ class MeshResult:
 
 
 class Preprocessor(Stage):
+    kind: ClassVar[str] = "preprocessor"
+
     @abstractmethod
     def run(self, image: itk.Image, case: CaseInfo) -> itk.Image:
         """Return the image in the atlas orientation, ready for segmentation and registration."""
 
 
 class Segmenter(Stage):
+    kind: ClassVar[str] = "segmenter"
+
     @abstractmethod
     def run(self, image: itk.Image) -> dict[str, itk.Image]:
         """Return probability maps keyed by structure: {"FC": ..., "TC": ...}."""
 
 
 class Registerer(Stage):
+    kind: ClassVar[str] = "registerer"
+
     @abstractmethod
     def run(self, moving: itk.Image, fixed: itk.Image) -> RegistrationResult: ...
 
 
 class MeshGenerator(Stage):
+    kind: ClassVar[str] = "mesh_generator"
+
     @abstractmethod
     def run(self, probability: itk.Image) -> vtk.vtkPolyData:
         """Return the surface of the structure, in patient space."""
 
 
 class ThicknessEstimator(Stage):
+    kind: ClassVar[str] = "thickness_estimator"
+
     @abstractmethod
     def run(self, mesh: vtk.vtkPolyData, probability: itk.Image, registration: RegistrationResult,
             atlas: Atlas, structure: str) -> MeshResult:
@@ -94,6 +105,8 @@ class ThicknessEstimator(Stage):
 
 
 class AtlasMapper(Stage):
+    kind: ClassVar[str] = "atlas_mapper"
+
     @abstractmethod
     def run(self, thickness_mesh: vtk.vtkPolyData, registration: RegistrationResult,
             atlas: Atlas, structure: str) -> MeshResult:
@@ -120,6 +133,8 @@ class CaseArtifacts:
 
 
 class BiomarkerExtractor(Stage):
+    kind: ClassVar[str] = "biomarker_extractor"
+
     @abstractmethod
     def run(self, case: CaseArtifacts) -> dict[str, object]:
         """

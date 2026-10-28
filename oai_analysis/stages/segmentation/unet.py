@@ -4,10 +4,12 @@ from typing import ClassVar
 import itk
 
 from oai_analysis.data import models_dir
+from oai_analysis.registry import register
 from oai_analysis.stages.segmentation.segmenter import Segmenter3DInPatchClassWise
 from oai_analysis.stages.base import Segmenter
 
 
+@register
 @dataclass
 class UNetSegmenter(Segmenter):
     """The 3D U-Net trained on OAI knees, applied in overlapping patches."""

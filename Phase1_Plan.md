@@ -694,6 +694,18 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
 - Add `oai-analysis config dump`, and an `OAPipeline.from_config()` round-trip test.
 - Done when: the default config reproduces Step 0, and a plugin in a throwaway test package is discovered through its entry point.
 
+**Status: done** (2026-10-28, branch `refactor`).
+- `registry.py`: `@register` makes a stage class available by its kind and name. The kind comes from the interface (a `kind` class attribute on each interface in `base.py`), so it is a bare `@register` rather than `@register("thickness_estimator")`. Registering a different class under a name that is taken is an error. Plugins are the modules named by `oai_analysis.plugins` entry points. They are imported the first time a name is not found, and a plugin that fails to import gives a warning instead of stopping the others.
+- `config.py` reads and writes the YAML format from 4.4: one entry per stage, `name` plus parameters, and `device` (`auto` picks CUDA when available). Settings that are left out keep their defaults, and an entry with no `name` keeps the default implementation, so `registerer: {finetune_steps: 5}` changes one parameter. Unknown keys, stage names and parameters stop with a message listing the valid ones. YAML lists become tuples again where the parameter's default is a tuple.
+- `OAPipeline.from_config(path_or_dict)` and `OAPipeline.config()`. The atlas is now loaded on first use, so creating a pipeline (e.g. to print its config) is cheap.
+- `cli.py` is the `oai-analysis` entry point: `oai-analysis config dump [--config FILE]` prints the full config, and the original `oai-analysis IMAGE OUT left|right` still works, now with `--config FILE`. `pipeline_cli.py` keeps the original command.
+- New dependency: `pyyaml`. `tools/run_baseline.py` gained `--config` and records the config in `run_info.json`.
+- The project-level keys of 4.4 (`retention`, `storage`, data roots) are not accepted yet. They arrive with Step 4, which also decides how `project.yaml` holds them.
+- Verification:
+  - Since Step 2b the default `back_mapping` is `cell_ids`, which intentionally differs from the golden set. So the check used the full dumped default config with only `back_mapping: transform` changed (`M:/Dev/Osteoarthritis/OAI_step3_transform.yaml`): 13/13 cases and 195/195 files pass against `OAI_golden_f198a2f/run1` (`M:/Dev/Osteoarthritis/OAI_step3_config_transform`), at 234–314 s per case.
+  - `oai-analysis IMAGE OUT left --config` with a two-line partial config, on the colab case from an unrelated CWD, passes against the golden set.
+  - `test/test_config.py` (12 tests): dump/load round trip, partial configs, error messages, the built-in registry, `config dump`, and a throwaway plugin package (a module plus a `.dist-info` with `entry_points.txt` on `sys.path`) whose stage is found through its entry point and named in a config. `pytest`: 29 passed; `test_SegmentationCPU` still fails as before.
+
 ### Step 4: Project structure + provenance + resume + batch (M1.3)
 
 - Add `project.py`: init from a manifest (knee-sarg CSV format), the folder layout, `status`, resume, staleness and `--from STAGE`.

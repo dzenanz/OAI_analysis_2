@@ -2,9 +2,11 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 from oai_analysis.algorithms.cartilage_shape_processing import thickness_grid, thickness_grid_png
+from oai_analysis.registry import register
 from oai_analysis.stages.base import BiomarkerExtractor, CaseArtifacts
 
 
+@register
 @dataclass
 class ThicknessMap2D(BiomarkerExtractor):
     """Thickness on the atlas, interpolated over the atlas' 2D embedding: an array and a picture per structure."""

@@ -103,6 +103,25 @@ result = pipeline.run_case(CaseInfo("IMAGE", "left"), "OUTPUT_DIR")
 fc_thickness_map = result.biomarkers["FC_thickness.npy"]
 ```
 
+Stages and their parameters can also be chosen in a YAML config file. Only the settings that differ
+from the defaults are needed; `oai-analysis config dump` prints the full config with every default.
+```yaml
+pipeline:
+  registerer: {finetune_steps: 5}
+  thickness_estimator: {name: distance_transform}
+```
+```
+oai-analysis IMAGE OUTPUT_DIR left --config my_config.yaml
+```
+or `OAPipeline.from_config("my_config.yaml")` in Python.
+
+Other packages can add stages that a config can then name: decorate the stage class with
+`@oai_analysis.registry.register`, and declare the module in an entry point:
+```toml
+[project.entry-points."oai_analysis.plugins"]
+my_stages = "my_package.stages"
+```
+
 To view the demo notebooks:
 ```
 cd notebooks

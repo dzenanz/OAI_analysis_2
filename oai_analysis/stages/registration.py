@@ -6,9 +6,11 @@ import itk
 from unigradicon import get_unigradicon
 
 from oai_analysis import data
+from oai_analysis.registry import register
 from oai_analysis.stages.base import RegistrationResult, Registerer
 
 
+@register
 @dataclass
 class UniGradICONRegisterer(Registerer):
     """uniGradICON, fine-tuned on each image pair."""

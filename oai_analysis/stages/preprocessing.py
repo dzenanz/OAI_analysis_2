@@ -4,6 +4,7 @@ from typing import ClassVar
 import itk
 import numpy as np
 
+from oai_analysis.registry import register
 from oai_analysis.stages.base import CaseInfo, Preprocessor
 
 
@@ -40,6 +41,7 @@ def window_intensities(image, window_min_percentile=0.1, window_max_percentile=9
     return result
 
 
+@register
 @dataclass
 class OAIPreprocessor(Preprocessor):
     """Mirror right knees to look like left ones, reorient to the atlas orientation, and window the intensities."""

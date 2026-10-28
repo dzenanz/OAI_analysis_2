@@ -25,10 +25,10 @@ PACKAGE_DIR = REPO_DIR / "oai_analysis"
 CASES_FILE = pathlib.Path(__file__).resolve().parent / "benchmark_cases.json"
 
 
-def import_analysis_pipeline(back_mapping=None):
+def import_analysis_pipeline(back_mapping=None, config_file=None):
     """
-    Return run(input, output_dir, laterality) and the directory that bundled case paths are relative to.
-    run() returns the seconds per stage, when the code reports them.
+    Return run(input, output_dir, laterality), the directory that bundled case paths are relative to,
+    and the pipeline config when the code has one. run() returns the seconds per stage, when the code reports them.
     """
     try:
         from oai_analysis.data import test_data_dir
@@ -37,17 +37,21 @@ def import_analysis_pipeline(back_mapping=None):
     except ImportError:
         pass
     else:
-        thickness = MeshSplittingThickness(back_mapping=back_mapping) if back_mapping else None
-        pipeline = OAPipeline(thickness_estimator=thickness)
+        if config_file:
+            pipeline = OAPipeline.from_config(config_file)
+        else:
+            thickness = MeshSplittingThickness(back_mapping=back_mapping) if back_mapping else None
+            pipeline = OAPipeline(thickness_estimator=thickness)
+        config = pipeline.config() if hasattr(pipeline, "config") else None
 
         def run(input_path, output_dir, laterality):
             result = pipeline.run_case(CaseInfo(input_path, laterality), output_dir, keep_intermediate_outputs=True)
             return {stage: round(seconds, 1) for stage, seconds in result.seconds.items()}
 
-        return run, test_data_dir().parent
+        return run, test_data_dir().parent, config
 
-    if back_mapping:
-        sys.exit("--back-mapping needs a version with oai_analysis.pipeline.OAPipeline")
+    if back_mapping or config_file:
+        sys.exit("--back-mapping and --config need a version with oai_analysis.pipeline.OAPipeline")
     try:
         from oai_analysis.data import test_data_dir
         from oai_analysis.pipeline import analysis_pipeline
@@ -65,7 +69,7 @@ def import_analysis_pipeline(back_mapping=None):
     def run(input_path, output_dir, laterality):
         analysis_pipeline(input_path, output_dir, laterality, keep_intermediate_outputs=True)
 
-    return run, bundled_data_dir
+    return run, bundled_data_dir, None
 
 
 def git_info():
@@ -118,17 +122,21 @@ def main():
                         help="Reference output directory; run tools/compare_outputs.py against it afterwards")
     parser.add_argument("--back-mapping", choices=["cell_ids", "transform"],
                         help="MeshSplittingThickness back_mapping (default: the pipeline's default)")
+    parser.add_argument("--config", type=pathlib.Path, help="Pipeline config file (YAML), see `oai-analysis config dump`")
     args = parser.parse_args()
+    if args.config and args.back_mapping:
+        parser.error("set back_mapping in the --config file instead")
 
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    run_pipeline, bundled_data_dir = import_analysis_pipeline(args.back_mapping)
+    run_pipeline, bundled_data_dir, config = import_analysis_pipeline(args.back_mapping, args.config)
     cases = select_cases(args, bundled_data_dir)
 
     run_info = {
         "started": datetime.datetime.now().astimezone().isoformat(),
         "git": git_info(),
         "environment": environment_info(),
+        "config": config,
         "cases": {},
     }
     info_file = output_dir / "run_info.json"

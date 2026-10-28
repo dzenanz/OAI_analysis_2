@@ -7,9 +7,11 @@ from vtk.util.numpy_support import numpy_to_vtk
 
 from oai_analysis.algorithms import mesh_processing as mp
 from oai_analysis.algorithms.thickness_computation import DistanceMapMethod, compute_thickness
+from oai_analysis.registry import register
 from oai_analysis.stages.base import MeshResult, ThicknessEstimator
 
 
+@register
 @dataclass
 class MeshSplittingThickness(ThicknessEstimator):
     """
@@ -64,6 +66,7 @@ def sample_distance_from_image(thickness_image, mesh):
     return result
 
 
+@register
 @dataclass
 class DistanceTransformThickness(ThicknessEstimator):
     """Thickness from a distance transform of the segmentation mask, sampled at the mesh vertices."""

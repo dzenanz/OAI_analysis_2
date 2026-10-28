@@ -2,9 +2,11 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 from oai_analysis.algorithms import mesh_processing as mp
+from oai_analysis.registry import register
 from oai_analysis.stages.base import AtlasMapper, MeshResult
 
 
+@register
 @dataclass
 class ClosestPointAtlasMapper(AtlasMapper):
     """Move the patient mesh into atlas space and give each atlas vertex the thickness of the closest patient point."""

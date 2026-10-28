@@ -11,7 +11,7 @@ import time
 
 import torch
 
-from oai_analysis import data, io
+from oai_analysis import config, data, io
 from oai_analysis.atlas import STRUCTURES, Atlas
 from oai_analysis.stages import (
     AtlasMapper,
@@ -31,6 +31,18 @@ from oai_analysis.stages import (
     UNetSegmenter,
     UniGradICONRegisterer,
 )
+
+
+# the stages OAPipeline uses unless told otherwise
+DEFAULT_STAGES = {
+    "preprocessor": OAIPreprocessor,
+    "segmenter": UNetSegmenter,
+    "registerer": UniGradICONRegisterer,
+    "mesh_generator": CuberilleMeshGenerator,
+    "thickness_estimator": MeshSplittingThickness,
+    "atlas_mapper": ClosestPointAtlasMapper,
+}
+DEFAULT_BIOMARKER_EXTRACTORS = (ThicknessMap2D,)
 
 
 def default_device():
@@ -58,16 +70,47 @@ class OAPipeline:
                  biomarker_extractors: list[BiomarkerExtractor] | None = None,
                  atlas: Atlas | None = None,
                  device: str | None = None):
-        self.preprocessor = preprocessor or OAIPreprocessor()
-        self.segmenter = segmenter or UNetSegmenter()
-        self.registerer = registerer or UniGradICONRegisterer()
-        self.mesh_generator = mesh_generator or CuberilleMeshGenerator()
-        self.thickness_estimator = thickness_estimator or MeshSplittingThickness()
-        self.atlas_mapper = atlas_mapper or ClosestPointAtlasMapper()
-        self.biomarker_extractors = biomarker_extractors if biomarker_extractors is not None else [ThicknessMap2D()]
-        self.atlas = atlas or Atlas.default()
+        self.preprocessor = preprocessor or DEFAULT_STAGES["preprocessor"]()
+        self.segmenter = segmenter or DEFAULT_STAGES["segmenter"]()
+        self.registerer = registerer or DEFAULT_STAGES["registerer"]()
+        self.mesh_generator = mesh_generator or DEFAULT_STAGES["mesh_generator"]()
+        self.thickness_estimator = thickness_estimator or DEFAULT_STAGES["thickness_estimator"]()
+        self.atlas_mapper = atlas_mapper or DEFAULT_STAGES["atlas_mapper"]()
+        self.biomarker_extractors = (biomarker_extractors if biomarker_extractors is not None
+                                     else [cls() for cls in DEFAULT_BIOMARKER_EXTRACTORS])
+        self._atlas = atlas
         self.device = device
         self._is_set_up = False
+
+    @classmethod
+    def from_config(cls, source, atlas: Atlas | None = None) -> "OAPipeline":
+        """Create a pipeline from a config: a dict, or the path of a YAML file. See config.py for the format."""
+        cfg = config.load(source)
+        config.check_keys(cfg)
+        section = cfg.get("pipeline") or {}
+        stages = {kind: config.stage_from_dict(kind, section.get(kind), DEFAULT_STAGES[kind])
+                  for kind in config.SINGLE_STAGES}
+        if config.BIOMARKER_EXTRACTORS in section:
+            stages[config.BIOMARKER_EXTRACTORS] = [config.stage_from_dict("biomarker_extractor", entry)
+                                                   for entry in section[config.BIOMARKER_EXTRACTORS] or []]
+        device = cfg.get("device", "auto")
+        return cls(**stages, atlas=atlas, device=None if device == "auto" else device)
+
+    def config(self) -> dict:
+        """The full config of this pipeline; from_config() of it creates an identical pipeline."""
+        return {
+            "pipeline": {
+                **{kind: config.stage_to_dict(getattr(self, kind)) for kind in config.SINGLE_STAGES},
+                config.BIOMARKER_EXTRACTORS: [config.stage_to_dict(e) for e in self.biomarker_extractors],
+            },
+            "device": self.device or "auto",
+        }
+
+    @property
+    def atlas(self) -> Atlas:
+        if self._atlas is None:  # loaded on first use, so that creating a pipeline is cheap
+            self._atlas = Atlas.default()
+        return self._atlas
 
     @property
     def stages(self):

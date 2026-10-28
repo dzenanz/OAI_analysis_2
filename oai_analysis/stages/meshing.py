@@ -5,9 +5,11 @@ import itk
 import vtk
 
 from oai_analysis.algorithms import mesh_processing as mp
+from oai_analysis.registry import register
 from oai_analysis.stages.base import MeshGenerator
 
 
+@register
 @dataclass
 class CuberilleMeshGenerator(MeshGenerator):
     """Cuberille iso-surface of the probability map, with vertices projected onto the iso-surface."""

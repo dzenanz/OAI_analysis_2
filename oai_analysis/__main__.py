@@ -1,3 +1,3 @@
-from oai_analysis.pipeline_cli import main
+from oai_analysis.cli import main
 
 main()

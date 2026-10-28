@@ -675,6 +675,19 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
 - Doing it after Step 2 keeps the main refactor bit-compatible, and the change is confined to one stage class.
 - Done when: `compare_outputs` against the Step 0 baseline is written up (timing saved per case, and how the thickness maps differ), and the old path with `back_mapping: transform` still passes Step 0.
 
+**Status: done** (2026-10-27, branch `refactor`, commit `b8bc907`).
+- `mesh_processing.get_split_cell_ids()` returns the inner and outer cell ids of the patient mesh. It tags `original_cell_id` on a shallow copy, so the input is not modified. `split_mesh()` is now built on `split_mesh_face_lists()`, which returns the face lists that used to be thrown away. `MeshSplittingThickness` is version "2", with `back_mapping` defaulting to `"cell_ids"`.
+- `transform_mesh` keeps the point and cell order exactly, which is what makes the cell ids valid in patient space. The cell_ids path makes 1 `transform_mesh` call per structure instead of 3.
+- `CaseArtifacts.seconds` records the wall time of each stage, and `tools/run_baseline.py` saves it per case in `run_info.json` (`--back-mapping` picks the mode).
+- New test: `test_split_cell_ids_match_split_mesh`. With no smoothing, the halves cut by cell id are identical to the halves from `split_mesh()`.
+- Verification (13 cases, against `OAI_golden_f198a2f/run1`):
+  - `back_mapping: transform`: 13/13 cases pass (`M:/Dev/Osteoarthritis/OAI_step2b_transform`).
+  - `back_mapping: cell_ids` (`M:/Dev/Osteoarthritis/OAI_step2b_cell_ids`): as expected, it does not pass the bit-compatibility tolerances. The files that differ are the thickness-related ones: `*_inner.vtk`, `*_outer.vtk`, `*_mesh_atlas.vtk`, `*_mapped_mesh.vtk` and `*_thickness.npy`. The probability maps, transforms and patient meshes are unchanged.
+  - Thickness maps: mean absolute difference 0.12–0.32 mm per map, 95th percentile 0.33–0.93 mm, maximum up to 3.8 mm. The halves are now the unsmoothed patient surface, about 0.3 mm from the smoothed surfaces used before.
+  - Bias: femoral cartilage comes out thicker in every case, by +0.03 to +0.16 mm in the map mean (about +6%). Tibial cartilage has no consistent direction, from -0.09 to +0.10 mm. Over all 26 maps, the mean shift is +0.04 mm (+2.4%).
+  - Time: the thickness stage averages 22.6 s per case with cell ids, against 24.3 s with the transform path (range 16–39 s against 19–40 s), about 7% faster. Whole cases average 214 s against 233 s. Registration takes about 200 s of each case, so that gap is mostly run-to-run noise in the registration stage rather than this change.
+  - Before relying on the new values, someone should look at the FC bias. The shift is the expected effect of measuring on unsmoothed meshes, but it is systematic, not noise.
+
 ### Step 3: Config + registry + plugins
 
 - Add `config.py` (dataclasses ↔ YAML), `registry.py` with `@register`, and the `oai_analysis.plugins` entry-point discovery.

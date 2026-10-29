@@ -14,7 +14,7 @@ import sys
 COMMANDS = ("config", "init", "run", "status")
 STEP_COLUMNS = {"preprocess": "prep", "segment": "seg", "register": "reg", "mesh": "mesh", "thickness": "thick",
                 "atlas_map": "atlas", "biomarkers": "bio"}
-SYMBOLS = {"done": "✓", "failed": "✗", "outdated": "~", "missing": ""}
+SYMBOLS = {"done": "✓", "review": "!", "failed": "✗", "outdated": "~", "missing": ""}
 
 
 def main(argv=None):
@@ -47,6 +47,7 @@ def main(argv=None):
     selectors.add_argument("--failed", action="store_true", help="Only cases that failed")
     selectors.add_argument("--stale", action="store_true", help="Only cases that are outdated by a config change")
     selectors.add_argument("--failed-at", metavar="STEP", help="Only cases that failed at this step, e.g. mesh")
+    selectors.add_argument("--needs-review", action="store_true", help="Only cases that a sanity check flagged")
 
     run_parser = commands.add_parser("run", parents=[selectors], help="Process the cases that are not up to date")
     run_parser.add_argument("--from", dest="from_step", metavar="STEP",
@@ -119,9 +120,10 @@ def status(args):
     if args.csv:
         with open(args.csv, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["case_id", "status", "failed_step", "note", *selected[0].steps])
+            writer.writerow(["case_id", "status", "failed_step", "note", *selected[0].steps, "review"])
             for s in selected:
-                writer.writerow([s.case_id, s.status, s.failed_step or "", s.note, *s.steps.values()])
+                review = "; ".join(message for messages in s.review.values() for message in messages)
+                writer.writerow([s.case_id, s.status, s.failed_step or "", s.note, *s.steps.values(), review])
         print(f"\nWrote {args.csv}")
 
 
@@ -130,15 +132,18 @@ def _selected(project, args, pipeline):
     unknown = [c for c in case_ids or [] if c not in project.cases]
     if unknown:
         sys.exit(f"Not in cases.csv: {', '.join(unknown)}")
-    return project.select(project.status(pipeline, case_ids), args.failed, args.stale, args.failed_at)
+    return project.select(project.status(pipeline, case_ids), args.failed, args.stale, args.failed_at,
+                          args.needs_review)
 
 
 def _step_columns(case_status) -> dict[str, str]:
-    """One column per step, with the biomarker steps combined: their worst state."""
+    """One column per step, with the biomarker steps combined: their worst state. "review": done, but flagged."""
     columns = {}
     for name, state in case_status.steps.items():
+        if state == "done" and name in case_status.review:
+            state = "review"
         column = STEP_COLUMNS["biomarkers" if name.startswith("biomarkers/") else name]
-        order = ["failed", "outdated", "missing", "done"]
+        order = ["failed", "outdated", "missing", "review", "done"]
         if column not in columns or order.index(state) < order.index(columns[column]):
             columns[column] = state
     return columns

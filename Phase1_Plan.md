@@ -777,6 +777,34 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
 - Tune the thresholds on the benchmark cases, using the Dec 18 triage as a reference: the Group 3 cases should come out *Needs Review* and the clean cases should not.
 - Done when: `oai-analysis status` for the 12-case project shows the expected Succeeded / Needs Review / Failed split, and every flag has a plain-English message.
 
+**Done** (2026-10-29, branch `refactor`). What was built, and where it departs from 4.9:
+- `QCFinding(severity, code, message, value)` with a third severity, `"info"`: a value that is only recorded (volumes, uncertainty, correlation, ...). `Stage.check(case: CaseArtifacts)` gets everything produced so far, not just the stage's outputs, because some checks need more (registration: the image and the atlas). Shared measurements are in `oai_analysis/qc.py`.
+- Thresholds are stage parameters listed in the new `Stage.check_params`. Like `performance_params` they stay out of the fingerprint. A project records them in `provenance.json` (`check_params`) next to the findings (`qc`). When they change, `status` says Outdated ("… changed 0.05 -> 0.1; run again to recheck") and `run` rechecks the saved outputs without redoing the step. Outputs from before Step 4b are Outdated once ("not checked yet"); rechecking takes about 10 s per case.
+- A "fail" finding fails the step (its outputs are kept), and `status` shows the message. "review" findings make a finished case **Needs Review**, mark their step `!` in `status`, and appear in `index.parquet` (`review` column) and the run summary. `status --needs-review` selects those cases, and `run` leaves them alone like Succeeded ones.
+- Checks of the default stages:
+
+| Stage | Check | Threshold (parameter) |
+|---|---|---|
+| Preprocess | axes point the same way as the atlas' | fail otherwise |
+| | spacing and size are the OAI DESS ones | review (`expected_spacing_mm` ±10%, `expected_size`) |
+| | median intensity after windowing | info |
+| Segment | the structure is not empty | fail |
+| | volume | review outside 4–20 ml FC, 1.5–8 ml TC (`fc_volume_ml`, `tc_volume_ml`) |
+| | share of the volume outside the largest piece (FC) or two (TC) | review above 5% (`max_outside_main_pieces`) |
+| | mean uncertainty 1 − \|2p − 1\| over the cartilage | review above 0.3 (`max_uncertainty`) |
+| Register | share of the displacement field that folds (Jacobian ≤ 0) | review above 1% (`max_folding`) |
+| | correlation of the warped image with the atlas | review below 0.75 (`min_similarity`) |
+| Mesh | the surface is not empty | fail |
+| Thickness | share of vertices thicker than 6 mm | review above 1% (`max_thickness_mm`, `max_too_thick`) |
+| Atlas mapping | share of the atlas surface without thickness (< 0.1 mm) | review above 15% (`max_without_thickness`) |
+
+- Left out: mesh self-intersection (VTK has no cheap self-intersection test; the 9021791 PR80 case is fine by every other measure), mesh island counts (they mirror the segmentation pieces), and the NaN fraction of the 2D map, which the atlas' shape fixes: 40.0% (FC) and 41.0% (TC) on every case.
+- Thumbnails (`oai_analysis/thumbnails.py`), in each case's `thumbnails/` folder: `segment_overlay.png` (the sagittal slice with the most cartilage, FC red, TC blue) and `atlas_map_FC.png` / `atlas_map_TC.png` (the 2D thickness maps on a fixed 0–5 mm scale, so cases compare). A failure to draw them is only logged.
+- Tuning, on `M:/Dev/Osteoarthritis/OAI_qc_project`: the 13 benchmark cases plus the 6 Dec 18 Group 3 cases they lacked (9094865 right 96M, 9103365 right 96M, 9135902 right 96M, 9530445 left 0M, left 36M, right 72M). 9103365 right 96M has two DESS series in the manifest; both are in, the second as `9103365_96M_RIGHT_B`.
+  - The two checks that separate the Group 3 cases are segmentation pieces and the atlas surface without thickness. Clean cases stay at or below 0.7% outside the main pieces and 11.3% without thickness. Every Group 3 case is above 5% or 15% on at least one of them.
+  - The other thresholds catch gross failures and flag none of the clean cases: uncertainty there is at most 0.23, correlation at least 0.83, folding at most 0.18%, thickness never above 5.2 mm.
+- Result (`status` after `run` rechecked the outputs): 10 Succeeded, 9 Needs Review, 1 Failed. All 9 Group 3 cases (counting 9103365's two series) need review. 9135902 left 0M fails at mesh generation as before. Group 2's 9016304 right 96M (the dent the old pipeline smoothed) needs review too, with 22.9% of its femoral cartilage outside the largest piece. The other 10 benchmark cases succeed. The 12-case project's own split is the same, since it holds those same outputs: 10 Succeeded, 2 Needs Review (9016304 left and right 96M), 1 Failed.
+
 ### Step 5: Second implementations (M1.2)
 
 - `GradICONKneeRegisterer`, `DistanceTransformThickness`, `PrecomputedSegmenter`, and optionally `MarchingCubesMeshGenerator`.

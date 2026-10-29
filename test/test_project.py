@@ -7,10 +7,10 @@ import itk
 import numpy as np
 import pytest
 
-from oai_analysis import OAPipeline
+from oai_analysis import OAPipeline, qc
 from oai_analysis.atlas import Atlas
 from oai_analysis.project import Project, read_manifest
-from oai_analysis.stages import Preprocessor
+from oai_analysis.stages import Preprocessor, QCFinding
 from test.test_stages import (
     ConstantThickness,
     FakeMeshGenerator,
@@ -302,3 +302,87 @@ def test_performance_params_do_not_make_outputs_outdated(project):
 class FastMeanThickness(MeanThickness):
     performance_params: ClassVar[tuple[str, ...]] = ("chunk",)
     chunk: int = 1
+
+
+@dataclass
+class CheckedThickness(ConstantThickness):
+    """Flags femoral cartilage thicker than max_mm for review."""
+    name: ClassVar[str] = "checked"
+    check_params: ClassVar[tuple[str, ...]] = ("max_mm",)
+    max_mm: float = 3.0
+
+    def check(self, case):
+        thickness = float(qc.point_values(case.thickness["FC"].mesh).max())
+        return [qc.finding(thickness > self.max_mm, "thickness.too_thick", f"FC is {thickness} mm thick", thickness)]
+
+
+@dataclass
+class CheckedSegmenter(FakeSegmenter):
+    """Fails the case whose image has spacing 0.6."""
+    name: ClassVar[str] = "checked"
+
+    def check(self, case):
+        if case.image.GetSpacing()[0] != 0.5:
+            return [QCFinding("fail", "segment.empty", "no femoral cartilage was found in the image")]
+        return []
+
+
+def provenance_of(project, case_id, folder):
+    return json.loads((project.case_folder(case_id) / folder / "provenance.json").read_text())
+
+
+def test_review_flags(project):
+    pipeline = make_pipeline()
+    pipeline.thickness_estimator = CheckedThickness(thickness=4.0)
+    result = project.run(pipeline=pipeline, echo=lambda text: None)
+    assert [s.status for s in result] == ["Needs Review", "Needs Review"]
+    assert result[0].note == "FC is 4.0 mm thick" and result[0].review == {"thickness": ["FC is 4.0 mm thick"]}
+    record = provenance_of(project, "1_00M_LEFT", "05_thickness")
+    assert record["qc"] == [{"severity": "review", "code": "thickness.too_thick", "message": "FC is 4.0 mm thick",
+                             "value": 4.0}]
+    assert record["check_params"] == {"max_mm": 3.0}
+    assert len(project.select(project.status(pipeline), needs_review=True)) == 2
+    before = started_times(project, "1_00M_LEFT")
+    project.run(pipeline=pipeline, echo=lambda text: None)
+    assert started_times(project, "1_00M_LEFT") == before  # a case that needs review is finished
+
+    # a new threshold rechecks the outputs without redoing the step
+    pipeline.thickness_estimator.max_mm = 5.0
+    status = project.status(pipeline)[0]
+    assert status.status == "Outdated"
+    assert status.note == "thickness_estimator.max_mm changed 3.0 -> 5.0; run again to recheck"
+    result = project.run(pipeline=pipeline, echo=lambda text: None)
+    assert [s.status for s in result] == ["Succeeded", "Succeeded"]
+    after = provenance_of(project, "1_00M_LEFT", "05_thickness")
+    assert after["started"] == record["started"] and after["qc"][0]["severity"] == "info"
+
+
+def test_fail_finding_fails_the_case(project):
+    pipeline = make_pipeline()
+    pipeline.segmenter = CheckedSegmenter()
+    result = project.run(pipeline=pipeline, echo=lambda text: None)
+    assert [s.status for s in result] == ["Succeeded", "Failed"]
+    assert result[1].failed_step == "segment"
+    assert result[1].note == 'Failed at "segmentation": no femoral cartilage was found in the image'
+    assert not (project.case_folder("2_00M_RIGHT") / "03_register").exists()  # the case went no further
+
+
+def test_older_outputs_get_checked(project):
+    project.run(pipeline=make_pipeline(), echo=lambda text: None)
+    for path in project.path.glob("cases/**/provenance.json"):  # as if made before the checks existed
+        record = json.loads(path.read_text())
+        del record["check_params"]
+        path.write_text(json.dumps(record))
+    status = project.status(make_pipeline())[0]
+    assert status.status == "Outdated" and status.note == "not checked yet; run again to check"
+    project.run(pipeline=make_pipeline(), echo=lambda text: None)
+    assert statuses(project, make_pipeline()) == {"1_00M_LEFT": "Succeeded", "2_00M_RIGHT": "Succeeded"}
+
+
+def test_thumbnails(project):
+    project.run(["1_00M_LEFT"], pipeline=make_pipeline(), echo=lambda text: None)
+    folder = project.case_folder("1_00M_LEFT") / "thumbnails"
+    assert (folder / "segment_overlay.png").read_bytes().startswith(b"\x89PNG")
+    # the tiny atlas has no 2D embedding, so there are no thickness maps; that does not fail the case
+    assert not list(folder.glob("atlas_map_*"))
+    assert project.status(make_pipeline())[0].status == "Succeeded"

@@ -136,10 +136,19 @@ oai-analysis status M:/OAI_projects/pilot
 oai-analysis run M:/OAI_projects/pilot --failed                 # only the cases that failed
 oai-analysis run M:/OAI_projects/pilot --cases 9016304_00M_LEFT --from mesh
 oai-analysis run M:/OAI_projects/pilot --batch-size 20
+oai-analysis status M:/OAI_projects/pilot --needs-review --csv flagged.csv
 ```
 Settings are in `project.yaml` (the pipeline config, plus `batch_size`, `retention: checkpoints|all|final` and
 the storage formats), and the cases are in `cases.csv`, which can be edited. Each run writes a full log and a plain-English
 summary to `logs/`, and a one-row-per-case table to `index.parquet`.
+
+After each step, sanity checks look at its outputs, e.g. whether the segmentation is in pieces or the cartilage has
+no thickness on much of its surface. A case they flag is marked **Needs Review**, with a plain-English note;
+a case whose outputs are unusable (e.g. no cartilage found) is marked Failed. Every measured value is kept in the
+step's `provenance.json`. The thresholds are parameters of the stages in `project.yaml` (e.g.
+`segmenter: {max_outside_main_pieces: 0.05}`); changing one rechecks the outputs without redoing anything. Each
+case also gets small pictures in its `thumbnails/` folder: the segmentation over the image, and the 2D thickness
+maps.
 
 To view the demo notebooks:
 ```

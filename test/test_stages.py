@@ -60,7 +60,7 @@ def test_preprocessor(laterality):
     image = ball_image()
     image.SetOrigin([1.0, 2.0, 3.0])
     preprocessor = OAIPreprocessor()
-    assert preprocessor.params() == {"window_min_percentile": 0.1, "window_max_percentile": 99.9}
+    assert preprocessor.result_params() == {"window_min_percentile": 0.1, "window_max_percentile": 99.9}
 
     result = preprocessor.run(image, CaseInfo("x.nii.gz", laterality))
 

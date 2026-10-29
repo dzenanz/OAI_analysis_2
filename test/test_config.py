@@ -117,4 +117,6 @@ def test_cli_config_dump(tmp_path, capsys):
     path.write_text("pipeline:\n  registerer: {finetune_steps: 5}\n")
     cli_main(["config", "dump", "--config", str(path)])
     assert yaml.safe_load(capsys.readouterr().out)["pipeline"]["registerer"] == {"name": "unigradicon",
-                                                                                  "finetune_steps": 5}
+                                                                                  "finetune_steps": 5,
+                                                                                  "max_folding": 0.01,
+                                                                                  "min_similarity": 0.75}

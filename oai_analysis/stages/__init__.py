@@ -9,6 +9,7 @@ from oai_analysis.stages.base import (
     MeshGenerator,
     MeshResult,
     Preprocessor,
+    QCFinding,
     RegistrationResult,
     Registerer,
     Segmenter,

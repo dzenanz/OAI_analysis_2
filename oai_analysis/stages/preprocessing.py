@@ -4,8 +4,9 @@ from typing import ClassVar
 import itk
 import numpy as np
 
+from oai_analysis import qc
 from oai_analysis.registry import register
-from oai_analysis.stages.base import CaseInfo, Preprocessor
+from oai_analysis.stages.base import CaseArtifacts, CaseInfo, Preprocessor, QCFinding
 
 
 def into_canonical_orientation(image, flip_left_right):
@@ -47,9 +48,34 @@ class OAIPreprocessor(Preprocessor):
     """Mirror right knees to look like left ones, reorient to the atlas orientation, and window the intensities."""
 
     name: ClassVar[str] = "oai_default"
+    check_params: ClassVar[tuple[str, ...]] = ("expected_spacing_mm", "expected_size")
     window_min_percentile: float = 0.1
     window_max_percentile: float = 99.9
+    expected_spacing_mm: tuple[float, float, float] = (0.365, 0.365, 0.7)  # OAI sagittal 3D DESS, within 10%
+    expected_size: tuple[int, int, int] = (384, 384, 160)
 
     def run(self, image: itk.Image, case: CaseInfo) -> itk.Image:
         image = into_canonical_orientation(image, case.laterality == "right")  # simplifies mesh processing
         return window_intensities(image, self.window_min_percentile, self.window_max_percentile)
+
+    def check(self, case: CaseArtifacts) -> list[QCFinding]:
+        image = case.image
+        findings = []
+        axes, atlas_axes = qc.axis_directions(image), qc.axis_directions(case.atlas.image)
+        if axes != atlas_axes:
+            findings.append(QCFinding("fail", "preprocess.orientation",
+                                      f"after reorientation, the image axes point along {axes}, but the atlas "
+                                      f"axes along {atlas_axes}"))
+        spacing = tuple(round(s, 3) for s in image.GetSpacing())
+        unusual = any(abs(s - e) > 0.1 * e for s, e in zip(spacing, self.expected_spacing_mm))
+        findings.append(qc.finding(unusual, "preprocess.spacing",
+                                   f"the voxel spacing is {' x '.join(map(str, spacing))} mm (expected: "
+                                   f"{' x '.join(map(str, self.expected_spacing_mm))})", max(spacing)))
+        size = tuple(int(s) for s in image.GetLargestPossibleRegion().GetSize())
+        findings.append(qc.finding(size != tuple(self.expected_size), "preprocess.size",
+                                   f"the image has {' x '.join(map(str, size))} voxels (expected: "
+                                   f"{' x '.join(map(str, self.expected_size))})", np.prod(size)))
+        median = float(np.median(itk.array_view_from_image(image)))
+        findings.append(QCFinding("info", "preprocess.median_intensity",
+                                  f"the median intensity after windowing is {median:.3f}", round(median, 6)))
+        return findings

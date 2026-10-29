@@ -5,10 +5,11 @@ A project: a folder with the cases to process, the pipeline config, and every ca
       project.yaml     pipeline config, data root, batch size, retention and storage formats
       cases.csv        one row per case: case_id, patient_id, month, laterality, input
       runs.jsonl       one line per `oai-analysis run`
-      index.parquet    one row per case: status, the step that failed, a note
+      index.parquet    one row per case: status, the step that failed, a note, the review flags
       logs/            the full log and a plain-English summary of each run
       cases/9016304/96M_LEFT/
         case.json                 the input and its hash
+        thumbnails/               small pictures to look at: the segmentation, the 2D thickness maps
         01_preprocess/            image.nrrd, provenance.json
         ...
         07_biomarkers/thickness_map_2d/
@@ -18,9 +19,14 @@ and the outputs of the steps it reads. `run` redoes everything else, so it resum
 only the steps a config change affects. Cases run in batches (batch_size in project.yaml): the cases of a batch
 are preprocessed, then segmented one after another, then registered one after another, so each network is
 loaded once per batch; then each case finishes on its own. A step that raises fails its case, not the batch.
+
+After a step works, its stage's check() looks at the outputs (see Stage.check). A "fail" finding fails the case,
+and a "review" one marks it Needs Review. The findings are kept in provenance.json. Changing a check's
+thresholds (its stage's check_params) rechecks the outputs without redoing the step.
 """
 import contextlib
 import csv
+import dataclasses
 import datetime
 import json
 import os
@@ -43,8 +49,9 @@ DEFAULT_SETTINGS = {"data_root": None, "retention": "checkpoints", "batch_size":
 KEPT_BY_FINAL = ("atlas_map", "biomarkers/")  # steps whose files retention: final keeps
 
 # case statuses, in plain language
-SUCCEEDED, FAILED, OUTDATED, INCOMPLETE, NOT_STARTED, RUNNING = (
-    "Succeeded", "Failed", "Outdated", "Incomplete", "Not started", "Running")
+SUCCEEDED, NEEDS_REVIEW, FAILED, OUTDATED, INCOMPLETE, NOT_STARTED, RUNNING = (
+    "Succeeded", "Needs Review", "Failed", "Outdated", "Incomplete", "Not started", "Running")
+FINISHED = (SUCCEEDED, NEEDS_REVIEW)  # statuses `run` leaves alone
 # step states
 DONE, STEP_FAILED, STEP_OUTDATED, MISSING = "done", "failed", "outdated", "missing"
 
@@ -67,6 +74,7 @@ class CaseStatus:
     duration_s: float = 0.0  # of the steps that are done
     last_run_s: float = 0.0  # of the steps that are done, run by the latest run that worked on the case
     finished: str | None = None  # when the last step finished
+    review: dict[str, list[str]] = dataclasses.field(default_factory=dict)  # step -> messages of its review flags
 
 
 class Project:
@@ -170,6 +178,9 @@ class Project:
             if (upstream_done and inputs is not None
                     and provenance.fingerprint(step.stage, inputs) == record["fingerprint"]):
                 states[step.name] = DONE
+                if record.get("check_params") != _check_params(step.stage):
+                    states[step.name] = STEP_OUTDATED
+                    notes[step.name] = _what_changed_in_checks(step, record)
             else:
                 states[step.name] = STEP_OUTDATED
                 notes[step.name] = _what_changed(step, record, upstream_done, inputs)
@@ -195,19 +206,29 @@ class Project:
         elif outdated:
             result.status, result.note = OUTDATED, notes[outdated[0]]
         elif all(state == DONE for state in states.values()):
-            result.status = SUCCEEDED
+            review = {name: [f["message"] for f in records[name].get("qc", []) if f["severity"] == "review"]
+                      for name in states}
+            result.review = {name: messages for name, messages in review.items() if messages}
+            messages = [message for messages in result.review.values() for message in messages]
+            if messages:
+                result.status = NEEDS_REVIEW
+                result.note = messages[0] + (f" (and {len(messages) - 1} more)" if len(messages) > 1 else "")
+            else:
+                result.status = SUCCEEDED
         elif any(state == DONE for state in states.values()):
             missing = next(name for name, state in states.items() if state == MISSING)
             result.status, result.note = INCOMPLETE, f'Stopped before "{described[missing]}"; run again to finish'
         return result
 
-    def select(self, statuses, failed=False, stale=False, failed_at=None) -> list[CaseStatus]:
+    def select(self, statuses, failed=False, stale=False, failed_at=None, needs_review=False) -> list[CaseStatus]:
         """The statuses matching the selectors; with none given, all of them."""
         wanted = set()
         if failed:
             wanted.add(FAILED)
         if stale:
             wanted.add(OUTDATED)
+        if needs_review:
+            wanted.add(NEEDS_REVIEW)
         selected = [s for s in statuses if not wanted or s.status in wanted]
         if failed_at:
             selected = [s for s in selected if s.failed_step == failed_at]
@@ -224,6 +245,7 @@ class Project:
                          "month": int(row["month"]) if row.get("month") else None,
                          "laterality": row["laterality"], "status": s.status, "failed_step": s.failed_step,
                          "note": s.note, **{f"step_{name}": state for name, state in s.steps.items()},
+                         "review": [message for messages in s.review.values() for message in messages],
                          "duration_s": s.duration_s, "finished": s.finished})
         temporary = self.path / "index.parquet.tmp"
         pq.write_table(pa.Table.from_pylist(rows), temporary)
@@ -249,7 +271,7 @@ class Project:
 
         statuses = {s.case_id: s for s in self.status(pipeline)}
         todo = [c for c in case_ids if statuses[c].status != RUNNING
-                and (from_step is not None or statuses[c].status != SUCCEEDED)]
+                and (from_step is not None or statuses[c].status not in FINISHED)]
         running = [c for c in case_ids if statuses[c].status == RUNNING]
 
         run_id = datetime.datetime.now().strftime("%Y-%m-%dT%H%M%S")
@@ -453,6 +475,21 @@ def _what_changed(step, record, upstream_done, inputs) -> str:
     return "its inputs changed"
 
 
+def _check_params(stage) -> dict:
+    """The values of the stage's check_params, as they are written to provenance.json."""
+    params = config.stage_to_dict(stage)
+    return {name: params[name] for name in stage.check_params}
+
+
+def _what_changed_in_checks(step, record) -> str:
+    old = record.get("check_params")
+    if old is None:
+        return "not checked yet; run again to check"
+    changed = [f"{step.stage.kind}.{k} changed {old.get(k)} -> {v}" for k, v in _check_params(step.stage).items()
+               if old.get(k) != v]
+    return "; ".join(changed or ["its checks changed"]) + "; run again to recheck"
+
+
 def _summary_line(status) -> str:
     time_text = datetime.datetime.now().strftime("%H:%M")
     if status.status == SUCCEEDED:
@@ -460,6 +497,9 @@ def _summary_line(status) -> str:
             return f"[{time_text}] {status.case_id:<20} Succeeded in {_duration(status.duration_s)}."
         return (f"[{time_text}] {status.case_id:<20} Succeeded in {_duration(status.last_run_s)} "
                 f"({_duration(status.duration_s)} including earlier runs).")
+    if status.status == NEEDS_REVIEW:
+        messages = [message for messages in status.review.values() for message in messages]
+        return f"[{time_text}] {status.case_id:<20} Needs Review: {'; '.join(messages)}."
     if status.status == FAILED:
         return (f"[{time_text}] {status.case_id:<20} {status.note}. Earlier steps are kept; rerun with "
                 f"--cases {status.case_id} --from {status.failed_step}")
@@ -609,8 +649,57 @@ class _CaseRunner:
         if (step.name not in self.rerun and record is not None and record["status"] == "complete"
                 and inputs is not None and provenance.fingerprint(step.stage, inputs) == record["fingerprint"]):
             self.records[step.name] = record
+            if record.get("check_params") != _check_params(step.stage):
+                self._recheck(step, record)
             return False
         return True
+
+    def _recheck(self, step, record):
+        """Check the outputs of a finished step again, e.g. with new thresholds."""
+        if not all(self._load(name) for name in (*step.inputs, step.name)):
+            return
+        self.progress(f"{self.case_id}: checking {step.description} again")
+        try:
+            self._check(step, record)
+        except Exception as e:
+            self._record_error(record, e)
+        self._thumbnails(step, only_missing=True)
+        _write_json(self.folder / step.folder / "provenance.json", record)
+        if record["status"] != "complete":
+            self.failed = True
+            del self.records[step.name]
+
+    def _check(self, step, record):
+        """Record what the stage's check() finds; a "fail" finding fails the step."""
+        findings = step.stage.check(self.result)
+        record["qc"] = [dataclasses.asdict(f) for f in findings]
+        record["check_params"] = _check_params(step.stage)
+        failures = [f.message for f in findings if f.severity == "fail"]
+        if failures:
+            record.update(status="failed", error="; ".join(failures))
+        for finding in findings:
+            print(f"{step.name} check, {finding.severity}: {finding.message}", flush=True)
+
+    def _thumbnails(self, step, only_missing=False):
+        """Write the pictures of what the step made (see thumbnails.py). A problem here is only logged."""
+        from oai_analysis import thumbnails
+
+        make = thumbnails.BY_STEP.get(step.name)
+        folder = self.folder / "thumbnails"
+        if make is None or (only_missing and folder.is_dir() and any(folder.glob(f"{step.name}_*"))):
+            return
+        try:
+            folder.mkdir(exist_ok=True)
+            for name, png in make(self.result).items():
+                (folder / f"{step.name}_{name}").write_bytes(png)
+        except Exception:
+            print(f"Could not make the thumbnails of {step.description}:\n{traceback.format_exc()}", flush=True)
+
+    @staticmethod
+    def _record_error(record, error):
+        record.update(status="failed", error=f"{type(error).__name__}: {error}".strip(),
+                      traceback="".join(traceback.format_exception(error)))
+        print(record["traceback"], flush=True)
 
     def _load(self, name) -> bool:
         """Put the outputs of a finished step in memory: read them, or run the step again if they were deleted."""
@@ -648,12 +737,13 @@ class _CaseRunner:
                 if self.project.settings["retention"] == "all":
                     record["intermediates"] = self.project._save(step, outcome.intermediates, step_folder)
                 record["status"] = "complete"
+                self._check(step, record)
             except Exception as e:
                 outcome = e
         if isinstance(outcome, Exception):
-            record.update(status="failed", error=f"{type(outcome).__name__}: {outcome}".strip(),
-                          traceback="".join(traceback.format_exception(outcome)))
-            print(record["traceback"], flush=True)
+            self._record_error(record, outcome)
+        else:
+            self._thumbnails(step)
         record["finished"] = provenance.now()
         record["duration_s"] = round(time.perf_counter() - start, 1)
         _write_json(step_folder / "provenance.json", record)

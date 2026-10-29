@@ -10,7 +10,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 import itk
 import numpy as np
@@ -46,14 +46,17 @@ class Stage(ABC):
     # parameters that change how the stage runs but not what it computes, e.g. how many patches share a pass
     # through the network; changing them does not make earlier outputs outdated
     performance_params: ClassVar[tuple[str, ...]] = ()
+    # parameters that only check() reads, e.g. thresholds; changing them rechecks earlier outputs, not redoes them
+    check_params: ClassVar[tuple[str, ...]] = ()
 
     def params(self) -> dict:
         """The parameters of this stage."""
         return {f.name: getattr(self, f.name) for f in fields(self)}
 
     def result_params(self) -> dict:
-        """The parameters that can change the stage's outputs: all but the performance_params."""
-        return {name: value for name, value in self.params().items() if name not in self.performance_params}
+        """The parameters that can change the stage's outputs: all but the performance_params and check_params."""
+        return {name: value for name, value in self.params().items()
+                if name not in self.performance_params and name not in self.check_params}
 
     def setup(self, device: str) -> None:
         """Load heavy resources (networks, weights). Called once, before the first case. Default: nothing."""
@@ -61,6 +64,25 @@ class Stage(ABC):
     def weights(self) -> dict[str, str]:
         """The files of trained weights the stage uses, with their hashes, e.g. {"model.pth": "sha256:..."}."""
         return {}
+
+    def check(self, case: CaseArtifacts) -> list[QCFinding]:
+        """
+        Sanity-check what this stage put in case. A project calls it after the stage succeeds. Default: no
+        findings.
+        """
+        return []
+
+
+@dataclass
+class QCFinding:
+    """
+    What a sanity check found. "fail" stops the case, "review" lets it go on but marks it Needs Review, and
+    "info" only records a value.
+    """
+    severity: Literal["info", "review", "fail"]
+    code: str  # for programs, e.g. "thickness.too_thick"
+    message: str  # plain English, for people
+    value: float | None = None
 
 
 @dataclass

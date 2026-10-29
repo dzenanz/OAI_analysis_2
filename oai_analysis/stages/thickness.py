@@ -5,10 +5,24 @@ import numpy as np
 import vtk
 from vtk.util.numpy_support import numpy_to_vtk
 
+from oai_analysis import qc
 from oai_analysis.algorithms import mesh_processing as mp
 from oai_analysis.algorithms.thickness_computation import DistanceMapMethod, compute_thickness
 from oai_analysis.registry import register
-from oai_analysis.stages.base import MeshResult, ThicknessEstimator
+from oai_analysis.stages.base import CaseArtifacts, MeshResult, QCFinding, ThicknessEstimator
+
+
+def thickness_findings(case, max_thickness_mm, max_too_thick) -> list[QCFinding]:
+    """Flag a structure thicker than max_thickness_mm on more than max_too_thick of its vertices."""
+    findings = []
+    for structure, result in case.thickness.items():
+        thickness = qc.point_values(result.mesh)
+        too_thick = float(np.mean(thickness > max_thickness_mm)) if len(thickness) else 0.0
+        findings.append(qc.finding(too_thick > max_too_thick, "thickness.too_thick",
+                                   f"the {qc.STRUCTURE_NAMES[structure]} is thicker than {max_thickness_mm} mm "
+                                   f"on {qc.percent(too_thick)} of its surface "
+                                   f"(review above {qc.percent(max_too_thick)})", too_thick))
+    return findings
 
 
 @register
@@ -24,9 +38,12 @@ class MeshSplittingThickness(ThicknessEstimator):
 
     name: ClassVar[str] = "mesh_splitting"
     version: ClassVar[str] = "2"
+    check_params: ClassVar[tuple[str, ...]] = ("max_thickness_mm", "max_too_thick")
     smoothing_iterations: int = 150
     island_distance_threshold_mm: float = 10.0
     back_mapping: str = "cell_ids"
+    max_thickness_mm: float = 6.0
+    max_too_thick: float = 0.01  # fraction of the vertices thicker than max_thickness_mm
 
     def __post_init__(self):
         if self.back_mapping not in ("cell_ids", "transform"):
@@ -47,6 +64,9 @@ class MeshSplittingThickness(ThicknessEstimator):
             outer = mp.transform_mesh(outer_atlas, registration.phi_AB)
         inner_with_thickness, outer_with_thickness = mp.get_distance(inner, outer)
         return MeshResult(outer_with_thickness, intermediates={"inner": inner_with_thickness})
+
+    def check(self, case: CaseArtifacts) -> list[QCFinding]:
+        return thickness_findings(case, self.max_thickness_mm, self.max_too_thick)
 
 
 def sample_distance_from_image(thickness_image, mesh):
@@ -72,9 +92,15 @@ class DistanceTransformThickness(ThicknessEstimator):
     """Thickness from a distance transform of the segmentation mask, sampled at the mesh vertices."""
 
     name: ClassVar[str] = "distance_transform"
+    check_params: ClassVar[tuple[str, ...]] = ("max_thickness_mm", "max_too_thick")
     distance_map_method: str = DistanceMapMethod.parabolic_morphology.value
+    max_thickness_mm: float = 6.0
+    max_too_thick: float = 0.01
 
     def run(self, mesh, probability, registration, atlas, structure):
         thickness_image, _, _ = compute_thickness(probability, method=DistanceMapMethod(self.distance_map_method))
         return MeshResult(sample_distance_from_image(thickness_image, mesh),
                           intermediates={"thickness_image": thickness_image})
+
+    def check(self, case: CaseArtifacts) -> list[QCFinding]:
+        return thickness_findings(case, self.max_thickness_mm, self.max_too_thick)

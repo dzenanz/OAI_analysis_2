@@ -125,9 +125,10 @@ my_stages = "my_package.stages"
 For many cases, use a project: a folder holding the cases, the config, and every output with its provenance.
 `run` skips what is already up to date, so it resumes an interrupted run, retries failed cases, and after a
 config change redoes only the steps that change affects. A case whose step fails is marked Failed and the run
-moves on. Cases run in batches: the images of `batch_size` cases (default 8) go through segmentation and
-registration together, then each case finishes on its own. A batch holds its cases' images, probability maps and
-transforms in memory, about 0.5 GB per case.
+moves on. Cases run in batches of `batch_size` (default 8): a batch's cases are preprocessed, then segmented one
+after another, then registered one after another, so each network is loaded and warm for the whole batch; then
+each case finishes on its own. A batch holds its cases' images, probability maps and transforms in memory, about
+0.5 GB per case.
 ```
 oai-analysis init M:/OAI_projects/pilot --data-root O:/OAI --manifest study_uid_to_vol_path.csv --patients 9016304,9021791
 oai-analysis run M:/OAI_projects/pilot

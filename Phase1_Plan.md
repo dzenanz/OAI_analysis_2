@@ -765,6 +765,12 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
   - The first run crashed (segmentation fault) while preprocessing 9094865 right 0M, in batch 2. `status` showed 8 Succeeded, 3 Incomplete, 2 Not started. The next `run` did only the 5 remaining cases, and 9094865 right 0M succeeded this time.
   - `pytest`: 40 passed, plus the known `test_SegmentationCPU` failure. New tests cover batches (one `run_batch` call per batch, each case getting its own outputs), a failing batch falling back to one by one, and `performance_params`.
 
+**Follow-up: batches without GPU batching** (2026-10-29). A batch was meant to run each network over its cases one after another, with the weights staying in GPU memory, not to pass several images through a network at once. GPU batching gained nothing with fine-tuning (the default), so it is gone:
+- Removed `Segmenter.run_batch`, `Registerer.run_batch`, their U-Net and uniGradICON overrides, the uniGradICON `batch_size` parameter, `OAPipeline.run_step_batch` and the fall-back to one by one. Provenance records no longer carry `batch_size`; `runs.jsonl` still does.
+- A batch now runs each step up to registration for each of its cases in turn (preprocess all, segment all, register all), then finishes each case on its own. A failing step fails only its case, as for any other step.
+- Kept: `torch.cuda.empty_cache()` once segmentation, then registration, is done with the batch's cases (`release_gpu_memory()`; the 180 s → 11 s gain; `OAPipeline.run()` calls it after each network), `batch_size` in `project.yaml` and `run --batch-size N`, and `performance_params` (for the U-Net's patches-per-pass `batch_size`).
+- Verification: 3 cases of `OAI_batch_project` rerun from preprocessing in one batch ran preprocess ×3, segment ×3, register ×3, then each case to the end; all succeeded. Segmentation took 18 s per case and registration 15–20 s. Registration is slower than the 11 s of 2026-10-28 on this machine today with the previous commit too (24 s), so the change costs nothing. `pytest`: 40 passed, plus the known `test_SegmentationCPU` failure.
+
 ### Step 4b: Sanity checks and thumbnails
 
 - `check()` on the default stages (4.9), `QCFinding`, the *Needs Review* status, and per-case thumbnails.

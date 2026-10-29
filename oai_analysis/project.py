@@ -15,9 +15,9 @@ A project: a folder with the cases to process, the pipeline config, and every ca
 
 A step is done when its provenance.json says so and its fingerprint (see provenance.py) still matches the config
 and the outputs of the steps it reads. `run` redoes everything else, so it resumes an interrupted run and redoes
-only the steps a config change affects. Cases run in batches (batch_size in project.yaml): segmentation and
-registration process the images of a batch together, then each case finishes on its own. A step that raises
-fails its case, not the batch.
+only the steps a config change affects. Cases run in batches (batch_size in project.yaml): the cases of a batch
+are preprocessed, then segmented one after another, then registered one after another, so each network is
+loaded once per batch; then each case finishes on its own. A step that raises fails its case, not the batch.
 """
 import contextlib
 import csv
@@ -235,7 +235,7 @@ class Project:
         """
         Process the cases (default: all) that are not up to date, skipping the steps that are.
         from_step reruns that step and every step that depends on it. batch_size (default: from project.yaml) is
-        how many cases go through segmentation and registration together.
+        how many cases go through segmentation, then registration, before each finishes on its own.
         """
         echo = echo or (lambda text, console=sys.stdout: print(text, file=console, flush=True))
         pipeline = pipeline or self.pipeline()
@@ -291,10 +291,10 @@ class Project:
     def work(self, pipeline, case_ids, from_step, run_id, batch_size, progress, case_finished):
         """
         Run the cases in batches of batch_size, in this process. The cases of a batch go through the steps up to
-        the last of the BATCHED_STEPS together, so the networks process their images together; then each case
-        finishes on its own. A failing step fails its case, not the batch.
+        the last of the BATCHED_STEPS step by step, one case after another, so a network stays in use for the
+        whole batch; then each case finishes on its own. A failing step fails its case, not the batch.
         """
-        from oai_analysis.pipeline import BATCHED_STEPS
+        from oai_analysis.pipeline import BATCHED_STEPS, release_gpu_memory
 
         pipeline.device = check_device(pipeline.device)
         pipeline.setup()
@@ -312,12 +312,11 @@ class Project:
                 batch = [_CaseRunner(self, pipeline, case_id, run_id, rerun, progress, heartbeat)
                          for case_id in batch_ids]
                 for step in steps[:together]:
-                    cases = [case for case in batch if case.needs(step)]
-                    if step.name in BATCHED_STEPS and len(cases) > 1:
-                        self._run_batch_step(pipeline, step, cases, progress, heartbeat)
-                    else:
-                        for case in cases:
+                    for case in batch:
+                        if case.needs(step):
                             case.run_step(step)
+                    if step.name in BATCHED_STEPS:
+                        release_gpu_memory()
                 for case in batch:
                     for step in steps[together:]:
                         if case.needs(step):
@@ -326,18 +325,6 @@ class Project:
                     case_finished(case.case_id)
         finally:
             heartbeat.stop()
-
-    def _run_batch_step(self, pipeline, step, cases, progress, heartbeat):
-        cases = [case for case in cases if case.load_inputs(step)]
-        records = [case.start(step) for case in cases]
-        progress(f"{step.description} of {_cases(len(cases))}")
-        heartbeat.set_step(step, [case.case_id for case in cases])
-        start = time.perf_counter()
-        outcomes = pipeline.run_step_batch(step, [case.result for case in cases])
-        seconds = (time.perf_counter() - start) / len(cases)
-        for case, record, outcome in zip(cases, records, outcomes):
-            record["batch_size"] = len(cases)
-            case.end(step, record, outcome, seconds)
 
     def _new_record(self, step, pipeline, inputs, records, run_id) -> dict:
         input_paths = {f"{name}/{out}": f"{records[name]['folder']}/{o['path']}"  # relative to the case folder
@@ -625,11 +612,8 @@ class _CaseRunner:
             return False
         return True
 
-    def load_inputs(self, step) -> bool:
-        """Put the outputs of the steps it reads in memory: read them, or run those steps again if they were deleted."""
-        return all(self._load(name) for name in step.inputs)
-
     def _load(self, name) -> bool:
+        """Put the outputs of a finished step in memory: read them, or run the step again if they were deleted."""
         if name in self.loaded:
             return True
         step = self.steps[name]
@@ -641,30 +625,23 @@ class _CaseRunner:
         return self.run_step(step)
 
     def run_step(self, step) -> bool:
-        if not self.load_inputs(step):
+        """
+        Run the step; save its outputs, or the exception that failed it, and its provenance. Returns whether it
+        worked.
+        """
+        if not all(self._load(name) for name in step.inputs):
             return False
-        record = self.start(step)
+        record = self.project._new_record(step, self.pipeline, self._input_hashes(step), self.records, self.run_id)
+        step_folder = self.folder / step.folder
+        shutil.rmtree(step_folder, ignore_errors=True)
+        step_folder.mkdir(parents=True)
         self.progress(f"{self.case_id}: {step.description}")
-        self.heartbeat.set_step(step, [self.case_id])
+        self.heartbeat.set_step(self.case_id, step)
         start = time.perf_counter()
         try:
             outcome = self.pipeline.run_step(step, self.result)
         except Exception as e:
             outcome = e
-        return self.end(step, record, outcome, time.perf_counter() - start)
-
-    def start(self, step) -> dict:
-        """Empty the step's folder; return its provenance record, to be completed by end()."""
-        record = self.project._new_record(step, self.pipeline, self._input_hashes(step), self.records, self.run_id)
-        step_folder = self.folder / step.folder
-        shutil.rmtree(step_folder, ignore_errors=True)
-        step_folder.mkdir(parents=True)
-        return record
-
-    def end(self, step, record, outcome, seconds) -> bool:
-        """Save the step's outputs, or the exception that failed it, and its provenance. Returns whether it worked."""
-        step_folder = self.folder / step.folder
-        start = time.perf_counter()
         if not isinstance(outcome, Exception):
             try:
                 record["outputs"] = self.project._save(step, outcome.outputs, step_folder)
@@ -678,7 +655,7 @@ class _CaseRunner:
                           traceback="".join(traceback.format_exception(outcome)))
             print(record["traceback"], flush=True)
         record["finished"] = provenance.now()
-        record["duration_s"] = round(seconds + time.perf_counter() - start, 1)
+        record["duration_s"] = round(time.perf_counter() - start, 1)
         _write_json(step_folder / "provenance.json", record)
         if record["status"] != "complete":
             self.failed = True
@@ -719,7 +696,7 @@ class _Heartbeat(threading.Thread):
         self.progress, self.run_id = progress, run_id
         self.markers = {}  # case_id -> its running.json
         self.steps = {}  # case_id -> the step it is on; None while it waits for other cases of its batch
-        self.step, self.step_cases = None, []
+        self.step, self.step_case = None, None
         self.step_started = self.last_progress = time.time()
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
@@ -734,12 +711,12 @@ class _Heartbeat(threading.Thread):
             self.markers.pop(case_id).unlink(missing_ok=True)
             del self.steps[case_id]
             if not self.markers:
-                self.step, self.step_cases = None, []
+                self.step, self.step_case = None, None
 
-    def set_step(self, step, case_ids):
+    def set_step(self, case_id, step):
         with self._lock:
-            self.steps = {case_id: step.description if case_id in case_ids else None for case_id in self.steps}
-            self.step, self.step_cases = step.description, case_ids
+            self.steps = {c: step.description if c == case_id else None for c in self.steps}
+            self.step, self.step_case = step.description, case_id
             self.step_started = self.last_progress = time.time()
             self._beat(list(self.markers))
 
@@ -755,8 +732,7 @@ class _Heartbeat(threading.Thread):
                 self._beat(list(self.markers))
                 if self.step is not None and time.time() - self.last_progress >= PROGRESS_EVERY_SECONDS:
                     minutes = (time.time() - self.step_started) / 60
-                    who = self.step_cases[0] if len(self.step_cases) == 1 else _cases(len(self.step_cases))
-                    self.progress(f"{who}: still working on {self.step} ({minutes:.0f} min)")
+                    self.progress(f"{self.step_case}: still working on {self.step} ({minutes:.0f} min)")
                     self.last_progress = time.time()
 
     def stop(self):

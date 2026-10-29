@@ -8,7 +8,6 @@ import functools
 import os
 import sys
 import time
-import traceback
 from dataclasses import dataclass, field
 
 import torch
@@ -158,6 +157,8 @@ class OAPipeline:
         for step in self.steps():
             with _timed(result, step.name):
                 writer.write(step, self.run_step(step, result))
+            if step.name in BATCHED_STEPS:
+                release_gpu_memory()
         return result
 
     def run_step(self, step: "Step", result: CaseArtifacts) -> "StepOutputs":
@@ -173,14 +174,12 @@ class OAPipeline:
                 return StepOutputs({"image": result.image})
             case "segment":
                 print("Segmenting the cartilage")
-                with _releasing_gpu_memory():
-                    result.probability = self.segmenter.run(result.image)
-                return _network_outputs(step, result)
+                result.probability = self.segmenter.run(result.image)
+                return StepOutputs({f"{s}_prob": result.probability[s] for s in STRUCTURES})
             case "register":
                 print("Registering the input image to the atlas")
-                with _releasing_gpu_memory():
-                    result.registration = self.registerer.run(result.image, self.atlas.image)
-                return _network_outputs(step, result)
+                result.registration = self.registerer.run(result.image, self.atlas.image)
+                return StepOutputs({"phi_AB": result.registration.phi_AB, "phi_BA": result.registration.phi_BA})
             case "mesh":
                 print("Converting segmentation probability images to meshes")
                 for s in STRUCTURES:
@@ -203,39 +202,6 @@ class OAPipeline:
                 outputs = step.stage.run(result)
                 result.biomarkers.update(outputs)
                 return StepOutputs(outputs)
-
-    def run_step_batch(self, step: "Step", results: list[CaseArtifacts]) -> list["StepOutputs | Exception"]:
-        """
-        Run one of the BATCHED_STEPS for several cases: their images go through the stage's run_batch() together.
-        Returns each case's outputs, or the exception that failed it. If the batch fails, its cases are run one
-        by one, so that only the case that causes the error fails.
-        """
-        if step.name not in BATCHED_STEPS:
-            raise ValueError(f"{step.name} is not one of the steps that run in batches: {BATCHED_STEPS}")
-        try:
-            with _releasing_gpu_memory():
-                match step.name:
-                    case "segment":
-                        print(f"Segmenting the cartilage of {len(results)} images")
-                        probabilities = self.segmenter.run_batch([r.image for r in results])
-                        for result, probability in zip(results, probabilities, strict=True):
-                            result.probability = probability
-                    case "register":
-                        print(f"Registering {len(results)} images to the atlas")
-                        registrations = self.registerer.run_batch([r.image for r in results], self.atlas.image)
-                        for result, registration in zip(results, registrations, strict=True):
-                            result.registration = registration
-            return [_network_outputs(step, result) for result in results]
-        except Exception:
-            print(traceback.format_exc())
-            print(f"The batch failed; running its {len(results)} cases one by one")
-        outcomes = []
-        for result in results:
-            try:
-                outcomes.append(self.run_step(step, result))
-            except Exception as e:
-                outcomes.append(e)
-        return outcomes
 
     def load_step(self, step: "Step", result: CaseArtifacts, files: dict):
         """Store the outputs of an earlier run of a step in result: the reverse of run_step(), from files by name."""
@@ -266,8 +232,8 @@ STEPS = {
     "thickness": ("thickness_estimator", ("mesh", "segment", "register"), "thickness measurement"),
     "atlas_map": ("atlas_mapper", ("thickness", "register"), "mapping to the atlas"),
 }
-# the steps that can process several cases at once (see OAPipeline.run_step_batch); a project runs them for a
-# batch of cases, then finishes each case on its own
+# the steps that use a neural network; a project runs each of them for all the cases of a batch, one after
+# another, while the network is loaded and warm, then finishes each case on its own
 BATCHED_STEPS = ("segment", "register")
 
 
@@ -287,24 +253,14 @@ class StepOutputs:
     intermediates: dict[str, object] = field(default_factory=dict)  # other outputs worth looking at
 
 
-def _network_outputs(step, result):
-    if step.name == "segment":
-        return StepOutputs({f"{s}_prob": result.probability[s] for s in STRUCTURES})
-    return StepOutputs({"phi_AB": result.registration.phi_AB, "phi_BA": result.registration.phi_BA})
-
-
-@contextlib.contextmanager
-def _releasing_gpu_memory():
+def release_gpu_memory():
     """
-    Give the GPU memory PyTorch keeps cached back when a network is done. Otherwise segmentation and registration
-    together reserve more than a 16 GB GPU has, and Windows makes up the difference with much slower system
-    memory: registration took 180 s instead of 17 s.
+    Give the GPU memory PyTorch keeps cached back, once a network is done with all the cases it gets. Otherwise
+    segmentation and registration together reserve more than a 16 GB GPU has, and Windows makes up the difference
+    with much slower system memory: registration took 180 s instead of 17 s.
     """
-    try:
-        yield
-    finally:
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def _mesh_results(name, results):

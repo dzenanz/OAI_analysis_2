@@ -214,75 +214,80 @@ def test_read_manifest(tmp_path):
     assert len(read_manifest(manifest, months=[0])) == 3
 
 
+def case_of(image):
+    return "1_00M_LEFT" if image.GetSpacing()[0] == 0.5 else "2_00M_RIGHT"
+
+
 @dataclass
-class BatchSegmenter(FakeSegmenter):
-    """Records how many images each call gets; a batch fails if it holds the case with spacing 0.6 and fail is set."""
-    performance_params: ClassVar[tuple[str, ...]] = ("calls",)  # so that recording calls does not outdate outputs
+class RecordingSegmenter(FakeSegmenter):
+    """Records which case it segments, in order; fails on the second case if fail is set."""
+    performance_params: ClassVar[tuple[str, ...]] = ("calls", "fail")  # so that they do not outdate outputs
     calls: list = field(default_factory=list)
     fail: bool = False
 
     def run(self, image):
-        self.calls.append(1)
-        if self.fail and image.GetSpacing()[0] != 0.5:
+        self.calls.append(("segment", case_of(image)))
+        if self.fail and case_of(image) == "2_00M_RIGHT":
             raise RuntimeError("bad image")
         return super().run(image)
 
-    def run_batch(self, images):
-        self.calls.append(len(images))
-        if self.fail and any(image.GetSpacing()[0] != 0.5 for image in images):
-            raise RuntimeError("bad image in the batch")
-        return [super(BatchSegmenter, self).run(image) for image in images]
-
 
 @dataclass
-class BatchRegisterer(IdentityRegisterer):
+class RecordingRegisterer(IdentityRegisterer):
     performance_params: ClassVar[tuple[str, ...]] = ("calls",)
     calls: list = field(default_factory=list)
 
     def run(self, moving, fixed):
-        self.calls.append(1)
+        self.calls.append(("register", case_of(moving)))
         return super().run(moving, fixed)
 
-    def run_batch(self, movings, fixed):
-        self.calls.append(len(movings))
-        return [super(BatchRegisterer, self).run(moving, fixed) for moving in movings]
+
+@dataclass
+class RecordingMeshGenerator(FakeMeshGenerator):
+    performance_params: ClassVar[tuple[str, ...]] = ("calls",)
+    calls: list = field(default_factory=list)
+
+    def run(self, probability):
+        if not self.calls or self.calls[-1] != ("mesh", case_of(probability)):  # once per case, not per structure
+            self.calls.append(("mesh", case_of(probability)))
+        return super().run(probability)
 
 
-def batch_pipeline(fail=False):
-    pipeline = make_pipeline()
-    pipeline.segmenter, pipeline.registerer = BatchSegmenter(fail=fail), BatchRegisterer()
-    return pipeline
+def recording_pipeline(fail=False):
+    """A pipeline whose segmenter, registerer and mesh generator record their calls in one list."""
+    calls = []
+    pipeline = make_pipeline(mesh_generator=RecordingMeshGenerator(calls=calls))
+    pipeline.segmenter = RecordingSegmenter(calls=calls, fail=fail)
+    pipeline.registerer = RecordingRegisterer(calls=calls)
+    return pipeline, calls
 
 
 def test_batches(project):
-    """The cases of a batch go through segmentation and registration together, each getting its own outputs."""
+    """A batch's cases are segmented one after another, then registered, then each finishes on its own."""
     assert project.settings["batch_size"] == 8
-    pipeline = batch_pipeline()
-    lines = []
-    result = project.run(pipeline=pipeline, echo=lines.append)
+    pipeline, calls = recording_pipeline()
+    result = project.run(pipeline=pipeline, echo=lambda text: None)
     assert [s.status for s in result] == ["Succeeded", "Succeeded"]
-    assert pipeline.segmenter.calls == [2] and pipeline.registerer.calls == [2]
-    assert any("segmentation of 2 cases" in line for line in lines)
-    for case_id, spacing in (("1_00M_LEFT", 0.5), ("2_00M_RIGHT", 0.6)):
-        folder = project.case_folder(case_id)
-        assert itk.imread(str(folder / "02_segment" / "FC_prob.nrrd")).GetSpacing()[0] == pytest.approx(spacing)
-        record = json.loads((folder / "02_segment" / "provenance.json").read_text())
-        assert record["batch_size"] == 2 and record["status"] == "complete"
-        assert not (folder / "running.json").exists()
+    assert calls == [("segment", "1_00M_LEFT"), ("segment", "2_00M_RIGHT"),
+                     ("register", "1_00M_LEFT"), ("register", "2_00M_RIGHT"),
+                     ("mesh", "1_00M_LEFT"), ("mesh", "2_00M_RIGHT")]
+    for case_id in ("1_00M_LEFT", "2_00M_RIGHT"):
+        assert not (project.case_folder(case_id) / "running.json").exists()
 
-    # batch_size: 1 runs the cases one after another
-    pipeline = batch_pipeline()
+    # batch_size: 1 runs one case to the end, then the other
+    pipeline, calls = recording_pipeline()
     project.run(from_step="preprocess", pipeline=pipeline, batch_size=1, echo=lambda text: None)
-    assert pipeline.segmenter.calls == [1, 1] and pipeline.registerer.calls == [1, 1]
+    assert calls == [("segment", "1_00M_LEFT"), ("register", "1_00M_LEFT"), ("mesh", "1_00M_LEFT"),
+                     ("segment", "2_00M_RIGHT"), ("register", "2_00M_RIGHT"), ("mesh", "2_00M_RIGHT")]
 
 
-def test_failed_batch_fails_only_its_bad_case(project):
-    pipeline = batch_pipeline(fail=True)
+def test_failure_in_a_batch_fails_only_its_case(project):
+    pipeline, calls = recording_pipeline(fail=True)
     result = project.run(pipeline=pipeline, echo=lambda text: None)
     assert [s.status for s in result] == ["Succeeded", "Failed"]
     assert result[1].failed_step == "segment" and result[1].note.endswith("RuntimeError: bad image")
-    assert pipeline.segmenter.calls == [2, 1, 1]  # the batch, then each case on its own
-    assert pipeline.registerer.calls == [1]  # the failed case goes no further
+    assert calls == [("segment", "1_00M_LEFT"), ("segment", "2_00M_RIGHT"),
+                     ("register", "1_00M_LEFT"), ("mesh", "1_00M_LEFT")]  # the failed case goes no further
 
 
 def test_performance_params_do_not_make_outputs_outdated(project):

@@ -43,7 +43,7 @@ class Stage(ABC):
     kind: ClassVar[str]  # which pipeline slot the stage fills, e.g. "registerer"; set by each interface below
     name: ClassVar[str]  # short identifier, unique within its kind, e.g. "unigradicon"
     version: ClassVar[str] = "1"  # bump whenever the implementation's output changes
-    # parameters that change how the stage runs but not what it computes, e.g. how many images share a pass
+    # parameters that change how the stage runs but not what it computes, e.g. how many patches share a pass
     # through the network; changing them does not make earlier outputs outdated
     performance_params: ClassVar[tuple[str, ...]] = ()
 
@@ -90,20 +90,12 @@ class Segmenter(Stage):
     def run(self, image: itk.Image) -> dict[str, itk.Image]:
         """Return probability maps keyed by structure: {"FC": ..., "TC": ...}."""
 
-    def run_batch(self, images: list[itk.Image]) -> list[dict[str, itk.Image]]:
-        """Segment several images. Override to pass them through the network together. Default: one by one."""
-        return [self.run(image) for image in images]
-
 
 class Registerer(Stage):
     kind: ClassVar[str] = "registerer"
 
     @abstractmethod
     def run(self, moving: itk.Image, fixed: itk.Image) -> RegistrationResult: ...
-
-    def run_batch(self, movings: list[itk.Image], fixed: itk.Image) -> list[RegistrationResult]:
-        """Register several images to fixed. Override to pass them through the network together. Default: one by one."""
-        return [self.run(moving, fixed) for moving in movings]
 
 
 class MeshGenerator(Stage):

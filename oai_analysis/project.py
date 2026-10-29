@@ -2,7 +2,7 @@
 A project: a folder with the cases to process, the pipeline config, and every case's outputs and provenance.
 
     PROJECT/
-      project.yaml     pipeline config, data root, retention and storage formats
+      project.yaml     pipeline config, data root, batch size, retention and storage formats
       cases.csv        one row per case: case_id, patient_id, month, laterality, input
       runs.jsonl       one line per `oai-analysis run`
       index.parquet    one row per case: status, the step that failed, a note
@@ -15,30 +15,30 @@ A project: a folder with the cases to process, the pipeline config, and every ca
 
 A step is done when its provenance.json says so and its fingerprint (see provenance.py) still matches the config
 and the outputs of the steps it reads. `run` redoes everything else, so it resumes an interrupted run and redoes
-only the steps a config change affects. Cases run in a separate worker process, so a crash in compiled code
-fails one case instead of stopping the batch.
+only the steps a config change affects. Cases run in batches (batch_size in project.yaml): segmentation and
+registration process the images of a batch together, then each case finishes on its own. A step that raises
+fails its case, not the batch.
 """
+import contextlib
 import csv
 import datetime
 import json
 import os
 import shutil
-import subprocess
 import sys
 import threading
 import time
 import traceback
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from oai_analysis import config, io, provenance
-from oai_analysis.atlas import Atlas
 
 CASE_COLUMNS = ("case_id", "patient_id", "month", "laterality", "input")
 RETENTION = ("checkpoints", "all", "final")
 IMAGE_FORMATS = ("nrrd", "nii.gz")
 TRANSFORM_FORMATS = ("h5", "tfm")
-DEFAULT_SETTINGS = {"data_root": None, "retention": "checkpoints",
+DEFAULT_SETTINGS = {"data_root": None, "retention": "checkpoints", "batch_size": 8,
                     "storage": {"image_format": "nrrd", "transform_format": "h5"}}
 KEPT_BY_FINAL = ("atlas_map", "biomarkers/")  # steps whose files retention: final keeps
 
@@ -51,7 +51,6 @@ DONE, STEP_FAILED, STEP_OUTDATED, MISSING = "done", "failed", "outdated", "missi
 HEARTBEAT_SECONDS = 60  # how often a running case updates its running.json
 RUNNING_TIMEOUT_SECONDS = 5 * 60  # a running.json older than this was left by a run that stopped
 PROGRESS_EVERY_SECONDS = 5 * 60  # how often a long step logs that it is still working
-WORKER_PREFIX = "@oai-analysis "  # marks the worker's messages to the supervisor in its output
 
 
 class DeviceError(RuntimeError):
@@ -70,16 +69,6 @@ class CaseStatus:
     finished: str | None = None  # when the last step finished
 
 
-@dataclass
-class _CaseRun:
-    """What the runner knows about a case while running it."""
-    case_id: str
-    folder: Path
-    input_sha256: str
-    records: dict[str, dict] = field(default_factory=dict)  # step name -> provenance of a finished step
-    loaded: set[str] = field(default_factory=set)  # steps whose outputs are in memory
-
-
 class Project:
     def __init__(self, path):
         self.path = Path(path)
@@ -94,6 +83,8 @@ class Project:
             raise ValueError(f"storage formats must be image_format: {IMAGE_FORMATS}, "
                              f"transform_format: {TRANSFORM_FORMATS}, not {storage}")
         self.storage = storage
+        if not isinstance(self.settings["batch_size"], int) or self.settings["batch_size"] < 1:
+            raise ValueError(f"batch_size must be a positive whole number, not {self.settings['batch_size']!r}")
         self.cases = _read_cases(self.path / "cases.csv")
 
     # creating a project
@@ -113,6 +104,7 @@ class Project:
         settings = {
             **OAPipeline.from_config(cfg).config(),  # the full config, so every default is written down
             "data_root": str(data_root) if data_root is not None else cfg.get("data_root"),
+            "batch_size": cfg.get("batch_size", DEFAULT_SETTINGS["batch_size"]),
             "retention": cfg.get("retention", retention),
             "storage": {**DEFAULT_SETTINGS["storage"], **(cfg.get("storage") or {})},
         }
@@ -180,7 +172,7 @@ class Project:
                 states[step.name] = DONE
             else:
                 states[step.name] = STEP_OUTDATED
-                notes[step.name] = _what_changed(step, record, upstream_done)
+                notes[step.name] = _what_changed(step, record, upstream_done, inputs)
 
         done_records = [records[name] for name, state in states.items() if state == DONE]
         latest = max(done_records, key=lambda r: r["finished"], default={})
@@ -192,7 +184,8 @@ class Project:
         described = {s.name: s.description for s in steps}
         if _is_running(folder):
             marker = _read_json(folder / "running.json")
-            result.status, result.note = RUNNING, f"Running {marker.get('step') or ''}".strip()
+            step = marker.get("step")
+            result.status, result.note = RUNNING, f"Running {step}" if step else "Waiting for its turn in the batch"
             return result
         failed = [name for name, state in states.items() if state == STEP_FAILED]
         outdated = [name for name, state in states.items() if state == STEP_OUTDATED]
@@ -238,16 +231,15 @@ class Project:
 
     # running
 
-    def run(self, case_ids=None, from_step=None, pipeline=None, in_process=False, echo=None) -> list[CaseStatus]:
+    def run(self, case_ids=None, from_step=None, pipeline=None, batch_size=None, echo=None) -> list[CaseStatus]:
         """
         Process the cases (default: all) that are not up to date, skipping the steps that are.
-        from_step reruns that step and every step that depends on it. A separate worker process runs the cases
-        unless in_process is set; a pipeline object (rather than project.yaml) can only be used in process.
+        from_step reruns that step and every step that depends on it. batch_size (default: from project.yaml) is
+        how many cases go through segmentation and registration together.
         """
-        echo = echo or (lambda text: print(text, flush=True))
-        if pipeline is not None and not in_process:
-            raise ValueError("A pipeline object can only be used with in_process=True")
+        echo = echo or (lambda text, console=sys.stdout: print(text, file=console, flush=True))
         pipeline = pipeline or self.pipeline()
+        batch_size = batch_size or self.settings["batch_size"]
         case_ids = list(case_ids or self.cases)
         unknown = [c for c in case_ids if c not in self.cases]
         if unknown:
@@ -266,11 +258,12 @@ class Project:
                     f"oai-analysis {provenance.software()['oai-analysis']}, config project.yaml")
         log.summary(f"{_cases(len(case_ids))} selected ({len(todo)} to do, "
                     f"{len(case_ids) - len(todo) - len(running)} already done"
-                    + (f", {len(running)} running in another process" if running else "") + ").")
+                    + (f", {len(running)} running in another process" if running else "")
+                    + f"), in batches of {batch_size}.")
         with open(self.path / "runs.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps({"run_id": run_id, "started": provenance.now(), "command": " ".join(sys.argv),
                                 "cases": len(case_ids), "to_do": len(todo), "from_step": from_step,
-                                "software": provenance.software()}) + "\n")
+                                "batch_size": batch_size, "software": provenance.software()}) + "\n")
 
         def case_finished(case_id):
             statuses[case_id] = status = self.case_status(pipeline, case_id)
@@ -278,10 +271,9 @@ class Project:
             self.write_index(statuses.values())
 
         try:
-            if in_process:
-                self.work(pipeline, todo, from_step, run_id, log.progress, case_finished)
-            else:
-                self._supervise(todo, from_step, run_id, log, case_finished)
+            # what the stages print, warnings included, goes to the full log
+            with contextlib.redirect_stdout(_LogWriter(log)), contextlib.redirect_stderr(_LogWriter(log)):
+                self.work(pipeline, todo, from_step, run_id, batch_size, log.progress, case_finished)
         except KeyboardInterrupt:
             log.summary("Run stopped by the user. Run again to continue where it stopped.")
             raise
@@ -296,94 +288,56 @@ class Project:
             log.close()
         return [statuses[c] for c in case_ids]
 
-    def work(self, pipeline, case_ids, from_step, run_id, progress, case_finished):
-        """Run the cases one after another, in this process. A failing step fails its case, not the batch."""
+    def work(self, pipeline, case_ids, from_step, run_id, batch_size, progress, case_finished):
+        """
+        Run the cases in batches of batch_size, in this process. The cases of a batch go through the steps up to
+        the last of the BATCHED_STEPS together, so the networks process their images together; then each case
+        finishes on its own. A failing step fails its case, not the batch.
+        """
+        from oai_analysis.pipeline import BATCHED_STEPS
+
         pipeline.device = check_device(pipeline.device)
         pipeline.setup()
         rerun = _steps_from(pipeline, from_step) if from_step is not None else set()
-        heartbeat = _Heartbeat(progress)
+        steps = pipeline.steps()
+        together = 1 + max(i for i, step in enumerate(steps) if step.name in BATCHED_STEPS)
+        heartbeat = _Heartbeat(progress, run_id)
         heartbeat.start()
         try:
-            for case_id in case_ids:
-                self._run_case(pipeline, case_id, rerun, run_id, progress, heartbeat)
-                case_finished(case_id)
+            for start in range(0, len(case_ids), batch_size):
+                batch_ids = case_ids[start:start + batch_size]
+                if len(case_ids) > batch_size:
+                    progress(f"Batch {start // batch_size + 1} of {-(-len(case_ids) // batch_size)}: "
+                             f"{', '.join(batch_ids)}")
+                batch = [_CaseRunner(self, pipeline, case_id, run_id, rerun, progress, heartbeat)
+                         for case_id in batch_ids]
+                for step in steps[:together]:
+                    cases = [case for case in batch if case.needs(step)]
+                    if step.name in BATCHED_STEPS and len(cases) > 1:
+                        self._run_batch_step(pipeline, step, cases, progress, heartbeat)
+                    else:
+                        for case in cases:
+                            case.run_step(step)
+                for case in batch:
+                    for step in steps[together:]:
+                        if case.needs(step):
+                            case.run_step(step)
+                    case.finish()
+                    case_finished(case.case_id)
         finally:
             heartbeat.stop()
 
-    def _run_case(self, pipeline, case_id, rerun, run_id, progress, heartbeat):
-        from oai_analysis.stages import CaseArtifacts
-
-        folder = self.case_folder(case_id)
-        folder.mkdir(parents=True, exist_ok=True)
-        case = self.case_info(case_id)
-        case_record = _read_json(folder / "case.json") or {}
-        if case_record.get("input") != str(case.input) or not case_record.get("input_sha256"):
-            progress(f"{case_id}: hashing the input")
-            case_record = {**self.cases[case_id], "input": str(case.input),
-                           "input_sha256": provenance.sha256_path(case.input)}
-            _write_json(folder / "case.json", case_record)
-        state = _CaseRun(case_id, folder, case_record["input_sha256"])
-        heartbeat.watch(folder / "running.json", case_id, run_id)
-        result = CaseArtifacts(case=case, atlas=pipeline.atlas)
-        steps = {s.name: s for s in pipeline.steps()}
-
-        def ensure_loaded(name) -> bool:
-            """Put a step's outputs in memory: read them, or run the step again if they were deleted."""
-            if name in state.loaded:
-                return True
-            step = steps[name]
-            files = {out: folder / step.folder / o["path"] for out, o in state.records[name]["outputs"].items()}
-            if all(path.is_file() for path in files.values()):
-                pipeline.load_step(step, result, files)
-                state.loaded.add(name)
-                return True
-            return run_step(step)
-
-        def run_step(step) -> bool:
-            if not all(ensure_loaded(name) for name in step.inputs):
-                return False
-            inputs = _input_hashes(step, state.input_sha256, state.records, pipeline.atlas_name)
-            record = self._new_record(step, pipeline, inputs, state.records, run_id)
-            step_folder = folder / step.folder
-            shutil.rmtree(step_folder, ignore_errors=True)
-            step_folder.mkdir(parents=True)
-            progress(f"{case_id}: {step.description}")
-            heartbeat.set_step(step)
-            start = time.perf_counter()
-            try:
-                outputs = pipeline.run_step(step, result)
-                record["outputs"] = self._save(step, outputs.outputs, step_folder)
-                if self.settings["retention"] == "all":
-                    record["intermediates"] = self._save(step, outputs.intermediates, step_folder)
-                record["status"] = "complete"
-            except Exception as e:
-                record.update(status="failed", error=f"{type(e).__name__}: {e}".strip(),
-                              traceback=traceback.format_exc())
-                print(record["traceback"], flush=True)
-            record["finished"] = provenance.now()
-            record["duration_s"] = round(time.perf_counter() - start, 1)
-            _write_json(step_folder / "provenance.json", record)
-            if record["status"] != "complete":
-                return False
-            state.records[step.name] = record
-            state.loaded.add(step.name)
-            return True
-
-        succeeded = True
-        for step in steps.values():
-            record = _read_json(folder / step.folder / "provenance.json")
-            inputs = _input_hashes(step, state.input_sha256, state.records, pipeline.atlas_name)
-            if (step.name not in rerun and record is not None and record["status"] == "complete"
-                    and inputs is not None and provenance.fingerprint(step.stage, inputs) == record["fingerprint"]):
-                state.records[step.name] = record  # up to date
-                continue
-            if not run_step(step):
-                succeeded = False
-                break
-        if succeeded and self.settings["retention"] == "final":
-            self._prune(steps.values(), state)
-        heartbeat.watch(None)
-        (folder / "running.json").unlink(missing_ok=True)
+    def _run_batch_step(self, pipeline, step, cases, progress, heartbeat):
+        cases = [case for case in cases if case.load_inputs(step)]
+        records = [case.start(step) for case in cases]
+        progress(f"{step.description} of {_cases(len(cases))}")
+        heartbeat.set_step(step, [case.case_id for case in cases])
+        start = time.perf_counter()
+        outcomes = pipeline.run_step_batch(step, [case.result for case in cases])
+        seconds = (time.perf_counter() - start) / len(cases)
+        for case, record, outcome in zip(cases, records, outcomes):
+            record["batch_size"] = len(cases)
+            case.end(step, record, outcome, seconds)
 
     def _new_record(self, step, pipeline, inputs, records, run_id) -> dict:
         input_paths = {f"{name}/{out}": f"{records[name]['folder']}/{o['path']}"  # relative to the case folder
@@ -420,73 +374,14 @@ class Project:
             saved[name] = {"path": filename, "sha256": provenance.sha256_file(path)}
         return saved
 
-    def _prune(self, steps, state):
+    def _prune(self, steps, folder):
         """retention: final keeps only the atlas-mapped meshes, the biomarkers and the provenance."""
         for step in steps:
             if step.name.startswith(KEPT_BY_FINAL):
                 continue
-            for path in (state.folder / step.folder).iterdir():
+            for path in (folder / step.folder).iterdir():
                 if path.name != "provenance.json":
                     path.unlink()
-
-    def _supervise(self, case_ids, from_step, run_id, log, case_finished):
-        """Run the cases in a worker process; after a crash, fail the case it was on and start a new worker."""
-        remaining = list(case_ids)
-        cases_file = self.path / "logs" / f"{run_id}.cases.txt"
-        while remaining:
-            cases_file.write_text("\n".join(remaining), encoding="utf-8")
-            command = [sys.executable, "-u", "-m", "oai_analysis.project", "worker", str(self.path),
-                       "--run-id", run_id, "--cases-file", str(cases_file)]
-            if from_step is not None:
-                command += ["--from", from_step]
-            worker = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                      encoding="utf-8", errors="replace",
-                                      env={**os.environ, "MPLBACKEND": "Agg"})  # no GUI toolkit in the worker
-            try:
-                for line in worker.stdout:
-                    if line.startswith(WORKER_PREFIX):
-                        kind, _, text = line[len(WORKER_PREFIX):].rstrip("\n").partition(" ")
-                        if kind == "progress":
-                            log.progress(text)
-                        elif kind == "done":
-                            remaining.remove(text)
-                            case_finished(text)
-                        elif kind == "error":
-                            log.summary(text)
-                    else:
-                        log.write(line)
-                exit_code = worker.wait()
-            except BaseException:
-                worker.kill()
-                raise
-            if not remaining or exit_code == 0:
-                break
-            crashed = remaining[0]
-            marker = _read_json(self.case_folder(crashed) / "running.json")
-            if marker is None or marker.get("run_id") != run_id:
-                log.summary(f"The worker process stopped (exit code {_exit_code(exit_code)}) before processing "
-                            f"{crashed}. See logs/{run_id}.log.")
-                break
-            self._record_crash(crashed, marker, exit_code)
-            remaining.pop(0)
-            case_finished(crashed)
-            if remaining:
-                log.summary(f"Starting a new worker process for the remaining {_cases(len(remaining))}.")
-        cases_file.unlink(missing_ok=True)
-
-    def _record_crash(self, case_id, marker, exit_code):
-        """Write a failed provenance for the step a crashed worker was running."""
-        folder = self.case_folder(case_id)
-        step_folder = folder / marker["step_folder"] if marker.get("step_folder") else None
-        message = f"The process crashed (exit code {_exit_code(exit_code)}), e.g. inside ITK or VTK code"
-        if step_folder is not None:
-            record = _read_json(step_folder / "provenance.json")
-            if record is None or record["status"] == "running":
-                record = {**(record or {}), "step": marker.get("step_name"), "status": "failed", "error": message,
-                          "finished": provenance.now()}
-                step_folder.mkdir(parents=True, exist_ok=True)
-                _write_json(step_folder / "provenance.json", record)
-        (folder / "running.json").unlink(missing_ok=True)
 
 
 def check_device(device) -> str:
@@ -549,7 +444,7 @@ def _input_hashes(step, input_sha256, records, atlas_name) -> dict[str, str] | N
     return inputs
 
 
-def _what_changed(step, record, upstream_done) -> str:
+def _what_changed(step, record, upstream_done, inputs) -> str:
     """Why a finished step is no longer up to date, in plain words."""
     stage = step.stage
     if record["implementation"] != stage.name:
@@ -559,13 +454,15 @@ def _what_changed(step, record, upstream_done) -> str:
     old_params = {k: v for k, v in record["params"].items() if k != "name"}
     new_params = config.stage_to_dict(stage)
     changed = [f"{stage.kind}.{k} changed {old_params.get(k)} -> {v}" for k, v in new_params.items()
-               if k != "name" and old_params.get(k) != v]
+               if k != "name" and k not in stage.performance_params and old_params.get(k) != v]
     if changed:
         return "; ".join(changed)
     if record.get("weights") != stage.weights():
         return f"{stage.name} uses different weights"
     if not upstream_done:
         return f'redo after an earlier step ("{step.description}" reads its outputs)'
+    if inputs is not None and inputs == {key: value["sha256"] for key, value in record.get("inputs", {}).items()}:
+        return "oai-analysis now fingerprints this step differently; redo it to be sure"
     return "its inputs changed"
 
 
@@ -591,10 +488,6 @@ def _duration(seconds) -> str:
     return f"{minutes}m{seconds:02d}s" if minutes else f"{seconds}s"
 
 
-def _exit_code(code) -> str:
-    return f"0x{code & 0xFFFFFFFF:08X}" if code < 0 or code > 255 else str(code)
-
-
 def _host():
     import platform
 
@@ -602,7 +495,7 @@ def _host():
 
 
 def _is_running(folder) -> bool:
-    """Whether a worker is processing the case: its marker is fresh, and its process is alive if it is on this host."""
+    """Whether a run is processing the case: its marker is fresh, and its process is alive if it is on this host."""
     marker = _read_json(folder / "running.json")
     if marker is None or time.time() - marker.get("heartbeat", 0) >= RUNNING_TIMEOUT_SECONDS:
         return False
@@ -695,75 +588,176 @@ class _RunLog:
         self.summary_file.close()
 
 
-class _Heartbeat(threading.Thread):
-    """Keeps the running case's running.json fresh, and says when a step takes long."""
+class _CaseRunner:
+    """Runs the steps of one case, keeping their outputs in memory for the steps that follow."""
 
-    def __init__(self, progress):
+    def __init__(self, project, pipeline, case_id, run_id, rerun, progress, heartbeat):
+        from oai_analysis.stages import CaseArtifacts
+
+        self.project, self.pipeline, self.case_id, self.run_id = project, pipeline, case_id, run_id
+        self.rerun, self.progress, self.heartbeat = rerun, progress, heartbeat
+        self.folder = project.case_folder(case_id)
+        self.folder.mkdir(parents=True, exist_ok=True)
+        case = project.case_info(case_id)
+        case_record = _read_json(self.folder / "case.json") or {}
+        if case_record.get("input") != str(case.input) or not case_record.get("input_sha256"):
+            progress(f"{case_id}: hashing the input")
+            case_record = {**project.cases[case_id], "input": str(case.input),
+                           "input_sha256": provenance.sha256_path(case.input)}
+            _write_json(self.folder / "case.json", case_record)
+        self.input_sha256 = case_record["input_sha256"]
+        self.result = CaseArtifacts(case=case, atlas=pipeline.atlas)
+        self.steps = {step.name: step for step in pipeline.steps()}
+        self.records = {}  # step name -> provenance of a finished step
+        self.loaded = set()  # steps whose outputs are in self.result
+        self.failed = False
+        heartbeat.add(case_id, self.folder / "running.json")
+
+    def needs(self, step) -> bool:
+        """Whether the step has to run. Call it for every step, in order; it remembers the steps that are done."""
+        if self.failed:
+            return False
+        record = _read_json(self.folder / step.folder / "provenance.json")
+        inputs = self._input_hashes(step)
+        if (step.name not in self.rerun and record is not None and record["status"] == "complete"
+                and inputs is not None and provenance.fingerprint(step.stage, inputs) == record["fingerprint"]):
+            self.records[step.name] = record
+            return False
+        return True
+
+    def load_inputs(self, step) -> bool:
+        """Put the outputs of the steps it reads in memory: read them, or run those steps again if they were deleted."""
+        return all(self._load(name) for name in step.inputs)
+
+    def _load(self, name) -> bool:
+        if name in self.loaded:
+            return True
+        step = self.steps[name]
+        files = {out: self.folder / step.folder / o["path"] for out, o in self.records[name]["outputs"].items()}
+        if all(path.is_file() for path in files.values()):
+            self.pipeline.load_step(step, self.result, files)
+            self.loaded.add(name)
+            return True
+        return self.run_step(step)
+
+    def run_step(self, step) -> bool:
+        if not self.load_inputs(step):
+            return False
+        record = self.start(step)
+        self.progress(f"{self.case_id}: {step.description}")
+        self.heartbeat.set_step(step, [self.case_id])
+        start = time.perf_counter()
+        try:
+            outcome = self.pipeline.run_step(step, self.result)
+        except Exception as e:
+            outcome = e
+        return self.end(step, record, outcome, time.perf_counter() - start)
+
+    def start(self, step) -> dict:
+        """Empty the step's folder; return its provenance record, to be completed by end()."""
+        record = self.project._new_record(step, self.pipeline, self._input_hashes(step), self.records, self.run_id)
+        step_folder = self.folder / step.folder
+        shutil.rmtree(step_folder, ignore_errors=True)
+        step_folder.mkdir(parents=True)
+        return record
+
+    def end(self, step, record, outcome, seconds) -> bool:
+        """Save the step's outputs, or the exception that failed it, and its provenance. Returns whether it worked."""
+        step_folder = self.folder / step.folder
+        start = time.perf_counter()
+        if not isinstance(outcome, Exception):
+            try:
+                record["outputs"] = self.project._save(step, outcome.outputs, step_folder)
+                if self.project.settings["retention"] == "all":
+                    record["intermediates"] = self.project._save(step, outcome.intermediates, step_folder)
+                record["status"] = "complete"
+            except Exception as e:
+                outcome = e
+        if isinstance(outcome, Exception):
+            record.update(status="failed", error=f"{type(outcome).__name__}: {outcome}".strip(),
+                          traceback="".join(traceback.format_exception(outcome)))
+            print(record["traceback"], flush=True)
+        record["finished"] = provenance.now()
+        record["duration_s"] = round(seconds + time.perf_counter() - start, 1)
+        _write_json(step_folder / "provenance.json", record)
+        if record["status"] != "complete":
+            self.failed = True
+            return False
+        self.records[step.name] = record
+        self.loaded.add(step.name)
+        return True
+
+    def finish(self):
+        if not self.failed and self.project.settings["retention"] == "final":
+            self.project._prune(self.steps.values(), self.folder)
+        self.heartbeat.remove(self.case_id)
+        self.result = None  # free the memory before the next case
+
+    def _input_hashes(self, step):
+        return _input_hashes(step, self.input_sha256, self.records, self.pipeline.atlas_name)
+
+
+class _LogWriter:
+    """Sends what the stages print to the full log of the run, rather than the console."""
+
+    def __init__(self, log):
+        self.log = log
+
+    def write(self, text):
+        self.log.write(text)
+        return len(text)
+
+    def flush(self):
+        pass
+
+
+class _Heartbeat(threading.Thread):
+    """Keeps running.json fresh in the folders of the cases being processed, and says when a step takes long."""
+
+    def __init__(self, progress, run_id):
         super().__init__(daemon=True)
-        self.progress = progress
-        self.marker = None
-        self.step, self.step_details = None, {}
+        self.progress, self.run_id = progress, run_id
+        self.markers = {}  # case_id -> its running.json
+        self.steps = {}  # case_id -> the step it is on; None while it waits for other cases of its batch
+        self.step, self.step_cases = None, []
+        self.step_started = self.last_progress = time.time()
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
 
-    def watch(self, marker, case_id=None, run_id=None):
+    def add(self, case_id, marker):
         with self._lock:
-            self.marker, self.case_id, self.run_id = marker, case_id, run_id
-            self.step, self.step_details = None, {}
-            self.step_started = self.last_progress = time.time()
-            self._beat()
+            self.markers[case_id], self.steps[case_id] = marker, None
+            self._beat([case_id])
 
-    def _beat(self):
-        if self.marker is not None:
-            _write_json(self.marker, {"pid": os.getpid(), "host": _host(), "run_id": self.run_id,
-                                      "case_id": self.case_id, "step": self.step, "heartbeat": time.time(),
-                                      **self.step_details})
-
-    def set_step(self, step):
+    def remove(self, case_id):
         with self._lock:
-            self.step = step.description
-            self.step_details = {"step_name": step.name, "step_folder": step.folder}
+            self.markers.pop(case_id).unlink(missing_ok=True)
+            del self.steps[case_id]
+            if not self.markers:
+                self.step, self.step_cases = None, []
+
+    def set_step(self, step, case_ids):
+        with self._lock:
+            self.steps = {case_id: step.description if case_id in case_ids else None for case_id in self.steps}
+            self.step, self.step_cases = step.description, case_ids
             self.step_started = self.last_progress = time.time()
-            self._beat()
+            self._beat(list(self.markers))
+
+    def _beat(self, case_ids):
+        for case_id in case_ids:
+            _write_json(self.markers[case_id], {"pid": os.getpid(), "host": _host(), "run_id": self.run_id,
+                                                "case_id": case_id, "step": self.steps[case_id],
+                                                "heartbeat": time.time()})
 
     def run(self):
         while not self._stop_event.wait(HEARTBEAT_SECONDS):
             with self._lock:
-                self._beat()
-                if self.marker is not None and time.time() - self.last_progress >= PROGRESS_EVERY_SECONDS:
+                self._beat(list(self.markers))
+                if self.step is not None and time.time() - self.last_progress >= PROGRESS_EVERY_SECONDS:
                     minutes = (time.time() - self.step_started) / 60
-                    self.progress(f"{self.case_id}: still working on {self.step} ({minutes:.0f} min)")
+                    who = self.step_cases[0] if len(self.step_cases) == 1 else _cases(len(self.step_cases))
+                    self.progress(f"{who}: still working on {self.step} ({minutes:.0f} min)")
                     self.last_progress = time.time()
 
     def stop(self):
         self._stop_event.set()
-
-
-def _worker_main(argv):
-    """The worker process started by Project.run(): `python -m oai_analysis.project worker PROJECT ...`."""
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["worker"])
-    parser.add_argument("project")
-    parser.add_argument("--run-id", required=True)
-    parser.add_argument("--cases-file", required=True)
-    parser.add_argument("--from", dest="from_step")
-    args = parser.parse_args(argv)
-
-    def say(kind, text):
-        print(f"{WORKER_PREFIX}{kind} {text}", flush=True)
-
-    project = Project(args.project)
-    case_ids = Path(args.cases_file).read_text(encoding="utf-8").split()
-    try:
-        project.work(project.pipeline(), case_ids, args.from_step, args.run_id,
-                     lambda text: say("progress", text), lambda case_id: say("done", case_id))
-    except DeviceError as e:
-        say("error", str(e))
-        return 3
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(_worker_main(sys.argv[1:]))

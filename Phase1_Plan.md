@@ -744,6 +744,27 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
   - Changing `back_mapping` to `cell_ids` in `project.yaml`: `status` showed 12 Outdated, with the reason. `run --stale` redid thickness, atlas mapping and the 2D maps of the 12 cases in 7 minutes. The provenance of the first four steps was unchanged, and the results pass against the Step 2b `cell_ids` run (12/12, 180/180).
   - `status` matched the folders at every point. `pytest`: 38 passed (9 in `test/test_project.py`, including a plugin whose stage kills the worker process with `os._exit`), plus the known `test_SegmentationCPU` failure.
 
+**Follow-up: batches instead of a worker process** (2026-10-28, branch `refactor`). A separate process per run cost performance and prevented batching, and the crashes should mostly go away with a newer ITKCuberille, so the supervisor/worker is gone (`--in-process` too).
+- Cases now run in batches, all in one process. `batch_size` in `project.yaml` (default 8) or `run --batch-size N` sets the batch size. A batch runs preprocessing case by case, then segmentation for all its cases, then registration for all of them. After that, each case finishes on its own.
+  - A batch keeps each case's image, probability maps and transforms in memory, about 0.5 GB per case.
+  - If a batched step raises, its cases are rerun one by one, so only the bad case fails.
+  - A crash in compiled code stops the run. The cases show as Incomplete, and the next `run` resumes them.
+- The stage interfaces gained `Segmenter.run_batch(images)` and `Registerer.run_batch(movings, fixed)`. By default they loop over `run()`. The pipeline gained `OAPipeline.run_step_batch()` and `BATCHED_STEPS = ("segment", "register")`. Each provenance record notes the `batch_size` it ran with, and `duration_s` is the case's share of the batch.
+- `UNetSegmenter.run_batch` sends the patches of all images through the network `batch_size` patches at a time. On 4 cases the results were bit-identical to `run()`, but no faster (56 s either way): the network is GPU-bound already. 8 patches per pass reached 8.1 GB and spilled out of GPU memory (1227 s for 4 images), so the default stays 4.
+- `UniGradICONRegisterer.run_batch`:
+  - **With fine-tuning (the default, `finetune_steps: 2`), pairs are registered one by one.** Fine-tuning tunes a copy of the network on each pair and peaks at 10.5 GB. Tuning one copy on several pairs would change the results, and two pairs would not fit in memory anyway.
+  - With `finetune_steps: 0` (now accepted; it means no fine-tuning), `batch_size` pairs (new parameter, default 4) go through the network together. On 8 cases: 8.1 s against 39.4 s one by one, peak 6.6 GB. Transformed points differ by at most 0.004 mm.
+- **The real speed-up: releasing GPU memory between networks.** Segmentation left 13 GB in PyTorch's cache, so registration reserved 26 GB on the 16 GB card. Windows made up the difference with system memory, and registration took 180–190 s instead of 17 s. The pipeline now calls `torch.cuda.empty_cache()` after segmentation and registration, which also helps `analysis_pipeline()`.
+- `Stage.performance_params` lists the parameters that change how fast a stage runs but not what it computes (`batch_size` of both networks). They are left out of the fingerprint, so changing them does not make outputs outdated.
+  - Removing the U-Net's `batch_size` from its fingerprint makes earlier projects' segmentations Outdated once. `status` says so, rather than "its inputs changed".
+- What the stages print, warnings included, goes to the run's full log (`logs/RUN.log`), as it did with the worker. The console gets the progress and summary lines.
+- Verification, on a fresh copy of the 13-case project (`M:/Dev/Osteoarthritis/OAI_batch_project`, same `project.yaml`, which has `back_mapping: cell_ids`, batches of 8):
+  - 12 cases succeeded. 9135902 left 0M failed at mesh generation (`IndexError`) without stopping the run.
+  - The results pass against the Step 2b `cell_ids` run (12/12 cases, 180/180 files).
+  - Each case took about 65 s, against about 4.5 min in Step 4. Average per step: preprocessing 6.5 s, segmentation 17.6 s (was 23.5), registration 11.1 s (was 180), mesh 1.9 s, thickness 21.8 s, atlas mapping 1.0 s.
+  - The first run crashed (segmentation fault) while preprocessing 9094865 right 0M, in batch 2. `status` showed 8 Succeeded, 3 Incomplete, 2 Not started. The next `run` did only the 5 remaining cases, and 9094865 right 0M succeeded this time.
+  - `pytest`: 40 passed, plus the known `test_SegmentationCPU` failure. New tests cover batches (one `run_batch` call per batch, each case getting its own outputs), a failing batch falling back to one by one, and `performance_params`.
+
 ### Step 4b: Sanity checks and thumbnails
 
 - `check()` on the default stages (4.9), `QCFinding`, the *Needs Review* status, and per-case thumbnails.

@@ -1,6 +1,6 @@
 import json
 import textwrap
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
 
 import itk
@@ -83,7 +83,7 @@ def test_create(project):
 
 def test_run_and_resume(project):
     pipeline = make_pipeline()
-    result = project.run(pipeline=pipeline, in_process=True, echo=lambda text: None)
+    result = project.run(pipeline=pipeline, echo=lambda text: None)
     assert [s.status for s in result] == ["Succeeded", "Succeeded"]
 
     folder = project.case_folder("1_00M_LEFT")
@@ -98,12 +98,12 @@ def test_run_and_resume(project):
     assert (project.path / "index.parquet").is_file() and (project.path / "runs.jsonl").is_file()
 
     before = started_times(project, "1_00M_LEFT")
-    project.run(pipeline=pipeline, in_process=True, echo=lambda text: None)
+    project.run(pipeline=pipeline, echo=lambda text: None)
     assert started_times(project, "1_00M_LEFT") == before  # nothing to redo
 
 
 def test_changed_parameter_reruns_only_affected_steps(project):
-    project.run(pipeline=make_pipeline(), in_process=True, echo=lambda text: None)
+    project.run(pipeline=make_pipeline(), echo=lambda text: None)
     before = started_times(project, "1_00M_LEFT")
 
     pipeline = make_pipeline(thickness=3.0)
@@ -112,7 +112,7 @@ def test_changed_parameter_reruns_only_affected_steps(project):
     assert status.note == "thickness_estimator.thickness changed 2.0 -> 3.0"
     assert status.steps["mesh"] == "done" and status.steps["atlas_map"] == "outdated"
 
-    project.run(pipeline=pipeline, in_process=True, echo=lambda text: None)
+    project.run(pipeline=pipeline, echo=lambda text: None)
     after = started_times(project, "1_00M_LEFT")
     rerun = [name for name in STEP_NAMES if after[name] != before[name]]
     assert rerun == ["thickness", "atlas_map", "biomarkers/mean_thickness"]
@@ -122,7 +122,7 @@ def test_changed_parameter_reruns_only_affected_steps(project):
 
 def test_failure_does_not_stop_the_batch(project):
     pipeline = make_pipeline(mesh_generator=FailingMeshGenerator())
-    result = project.run(pipeline=pipeline, in_process=True, echo=lambda text: None)
+    result = project.run(pipeline=pipeline, echo=lambda text: None)
     assert [s.status for s in result] == ["Succeeded", "Failed"]
     failed = result[1]
     assert failed.failed_step == "mesh"
@@ -134,7 +134,7 @@ def test_failure_does_not_stop_the_batch(project):
     # once fixed, a rerun redoes the failed case from the failed step
     before = started_times(project, "1_00M_LEFT")
     segment_before = (project.case_folder("2_00M_RIGHT") / "02_segment/provenance.json").stat().st_mtime_ns
-    result = project.run(pipeline=make_pipeline(), in_process=True, echo=lambda text: None)
+    result = project.run(pipeline=make_pipeline(), echo=lambda text: None)
     assert [s.status for s in result] == ["Succeeded", "Succeeded"]
     assert started_times(project, "1_00M_LEFT") == before
     segment_after = (project.case_folder("2_00M_RIGHT") / "02_segment/provenance.json").stat().st_mtime_ns
@@ -143,7 +143,7 @@ def test_failure_does_not_stop_the_batch(project):
 
 def test_interrupted_case_resumes(project):
     pipeline = make_pipeline()
-    project.run(["1_00M_LEFT"], pipeline=pipeline, in_process=True, echo=lambda text: None)
+    project.run(["1_00M_LEFT"], pipeline=pipeline, echo=lambda text: None)
     folder = project.case_folder("1_00M_LEFT")
     for step in ("06_atlas_map", "07_biomarkers"):  # as if the run was killed during atlas mapping
         for record in folder.glob(f"{step}/**/provenance.json"):
@@ -153,7 +153,7 @@ def test_interrupted_case_resumes(project):
     status = project.status(pipeline)[0]
     assert status.status == "Incomplete" and status.note.startswith('Stopped before "mapping to the atlas"')
 
-    project.run(["1_00M_LEFT"], pipeline=pipeline, in_process=True, echo=lambda text: None)
+    project.run(["1_00M_LEFT"], pipeline=pipeline, echo=lambda text: None)
     after = started_times(project, "1_00M_LEFT")
     assert {name: after[name] for name in before} == before
     assert project.status(pipeline)[0].status == "Succeeded"
@@ -170,9 +170,9 @@ def started_times_partial(project, case_id):
 
 
 def test_from_step(project):
-    project.run(pipeline=make_pipeline(), in_process=True, echo=lambda text: None)
+    project.run(pipeline=make_pipeline(), echo=lambda text: None)
     before = started_times(project, "1_00M_LEFT")
-    project.run(["1_00M_LEFT"], from_step="mesh", pipeline=make_pipeline(), in_process=True, echo=lambda text: None)
+    project.run(["1_00M_LEFT"], from_step="mesh", pipeline=make_pipeline(), echo=lambda text: None)
     after = started_times(project, "1_00M_LEFT")
     assert [name for name in STEP_NAMES if after[name] != before[name]] == [
         "mesh", "thickness", "atlas_map", "biomarkers/mean_thickness"]
@@ -181,7 +181,7 @@ def test_from_step(project):
 def test_retention_final(project):
     project.settings["retention"] = "final"
     pipeline = make_pipeline(extractor=AtlasOnlyMeanThickness())
-    project.run(["1_00M_LEFT"], pipeline=pipeline, in_process=True, echo=lambda text: None)
+    project.run(["1_00M_LEFT"], pipeline=pipeline, echo=lambda text: None)
     folder = project.case_folder("1_00M_LEFT")
     assert [p.name for p in (folder / "02_segment").iterdir()] == ["provenance.json"]
     assert (folder / "06_atlas_map" / "FC_atlas.vtk").is_file()
@@ -189,13 +189,13 @@ def test_retention_final(project):
 
     # the biomarker reads only the atlas-mapped meshes, which are kept, so it reruns alone
     before = started_times(project, "1_00M_LEFT")
-    project.run(["1_00M_LEFT"], from_step="biomarkers/mean_thickness", pipeline=pipeline, in_process=True,
+    project.run(["1_00M_LEFT"], from_step="biomarkers/mean_thickness", pipeline=pipeline,
                 echo=lambda text: None)
     after = started_times(project, "1_00M_LEFT")
     assert [name for name in STEP_NAMES if after[name] != before[name]] == ["biomarkers/mean_thickness"]
 
     # a step whose inputs were deleted gets them by running the earlier steps again
-    project.run(["1_00M_LEFT"], from_step="mesh", pipeline=pipeline, in_process=True, echo=lambda text: None)
+    project.run(["1_00M_LEFT"], from_step="mesh", pipeline=pipeline, echo=lambda text: None)
     assert project.status(pipeline)[0].status == "Succeeded"
 
 
@@ -214,126 +214,86 @@ def test_read_manifest(tmp_path):
     assert len(read_manifest(manifest, months=[0])) == 3
 
 
-PLUGIN = '''
-import os
-from dataclasses import dataclass
-from typing import ClassVar
-
-import itk
-import numpy as np
-import vtk
-from vtk.util.numpy_support import numpy_to_vtk
-
-from oai_analysis.registry import register
-from oai_analysis.stages import (AtlasMapper, BiomarkerExtractor, MeshGenerator, MeshResult, Preprocessor,
-                                 RegistrationResult, Registerer, Segmenter, ThicknessEstimator)
-
-
-@register
 @dataclass
-class CrashingPreprocessor(Preprocessor):
-    name: ClassVar[str] = "test_crashing"
-
-    def run(self, image, case):
-        if "CRASH" in case.case_id:
-            os._exit(7)  # like a segmentation fault: the process ends without raising
-        return image
-
-
-@register
-@dataclass
-class TestSegmenter(Segmenter):
-    name: ClassVar[str] = "test_identity"
+class BatchSegmenter(FakeSegmenter):
+    """Records how many images each call gets; a batch fails if it holds the case with spacing 0.6 and fail is set."""
+    performance_params: ClassVar[tuple[str, ...]] = ("calls",)  # so that recording calls does not outdate outputs
+    calls: list = field(default_factory=list)
+    fail: bool = False
 
     def run(self, image):
-        return {"FC": image, "TC": image}
+        self.calls.append(1)
+        if self.fail and image.GetSpacing()[0] != 0.5:
+            raise RuntimeError("bad image")
+        return super().run(image)
+
+    def run_batch(self, images):
+        self.calls.append(len(images))
+        if self.fail and any(image.GetSpacing()[0] != 0.5 for image in images):
+            raise RuntimeError("bad image in the batch")
+        return [super(BatchSegmenter, self).run(image) for image in images]
 
 
-@register
 @dataclass
-class TestRegisterer(Registerer):
-    name: ClassVar[str] = "test_identity"
+class BatchRegisterer(IdentityRegisterer):
+    performance_params: ClassVar[tuple[str, ...]] = ("calls",)
+    calls: list = field(default_factory=list)
 
     def run(self, moving, fixed):
-        identity = itk.IdentityTransform[itk.D, 3].New()
-        return RegistrationResult(identity, identity)
+        self.calls.append(1)
+        return super().run(moving, fixed)
+
+    def run_batch(self, movings, fixed):
+        self.calls.append(len(movings))
+        return [super(BatchRegisterer, self).run(moving, fixed) for moving in movings]
 
 
-@register
-@dataclass
-class TestMeshGenerator(MeshGenerator):
-    name: ClassVar[str] = "test_sphere"
-
-    def run(self, probability):
-        sphere = vtk.vtkSphereSource()
-        sphere.Update()
-        mesh = sphere.GetOutput()
-        mesh.GetPointData().RemoveArray("Normals")
-        return mesh
+def batch_pipeline(fail=False):
+    pipeline = make_pipeline()
+    pipeline.segmenter, pipeline.registerer = BatchSegmenter(fail=fail), BatchRegisterer()
+    return pipeline
 
 
-@register
-@dataclass
-class TestThickness(ThicknessEstimator):
-    name: ClassVar[str] = "test_constant"
-
-    def run(self, mesh, probability, registration, atlas, structure):
-        result = vtk.vtkPolyData()
-        result.DeepCopy(mesh)
-        array = numpy_to_vtk(np.full(mesh.GetNumberOfPoints(), 2.0, dtype=np.float32), deep=True)
-        array.SetName("vertex_thickness")
-        result.GetPointData().AddArray(array)
-        return MeshResult(result)
-
-
-@register
-@dataclass
-class TestMapper(AtlasMapper):
-    name: ClassVar[str] = "test_identity"
-
-    def run(self, thickness_mesh, registration, atlas, structure):
-        return MeshResult(thickness_mesh)
-
-
-@register
-@dataclass
-class TestMean(BiomarkerExtractor):
-    name: ClassVar[str] = "test_mean"
-    requires: ClassVar[tuple] = ("atlas_map",)
-
-    def run(self, case):
-        return {"mean.npy": np.array([case.atlas_thickness(s).mean() for s in ("FC", "TC")])}
-'''
-
-
-def test_worker_crash_fails_one_case(tmp_path, monkeypatch):
-    """A crash that ends the worker process fails that case; a new worker processes the rest."""
-    (tmp_path / "plugin").mkdir()
-    (tmp_path / "plugin" / "oai_test_stages.py").write_text(PLUGIN)
-    dist_info = tmp_path / "plugin" / "oai_test_stages-0.1.dist-info"
-    dist_info.mkdir()
-    (dist_info / "METADATA").write_text("Metadata-Version: 2.1\nName: oai-test-stages\nVersion: 0.1\n")
-    (dist_info / "entry_points.txt").write_text("[oai_analysis.plugins]\ntest_stages = oai_test_stages\n")
-    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "plugin"))
-
-    itk.imwrite(ball_image(), str(tmp_path / "a.nrrd"))
-    cases = [{"case_id": case_id, "laterality": "left", "input": "a.nrrd"}
-             for case_id in ("A_OK", "B_CRASH", "C_OK")]
-    config = {"pipeline": {"preprocessor": {"name": "test_crashing"}, "segmenter": {"name": "test_identity"},
-                           "registerer": {"name": "test_identity"}, "mesh_generator": {"name": "test_sphere"},
-                           "thickness_estimator": {"name": "test_constant"},
-                           "atlas_mapper": {"name": "test_identity"},
-                           "biomarker_extractors": [{"name": "test_mean"}]},
-              "device": "cpu"}
-    monkeypatch.syspath_prepend(str(tmp_path / "plugin"))
-    project = Project.create(tmp_path / "project", cases, config, data_root=tmp_path)
+def test_batches(project):
+    """The cases of a batch go through segmentation and registration together, each getting its own outputs."""
+    assert project.settings["batch_size"] == 8
+    pipeline = batch_pipeline()
     lines = []
+    result = project.run(pipeline=pipeline, echo=lines.append)
+    assert [s.status for s in result] == ["Succeeded", "Succeeded"]
+    assert pipeline.segmenter.calls == [2] and pipeline.registerer.calls == [2]
+    assert any("segmentation of 2 cases" in line for line in lines)
+    for case_id, spacing in (("1_00M_LEFT", 0.5), ("2_00M_RIGHT", 0.6)):
+        folder = project.case_folder(case_id)
+        assert itk.imread(str(folder / "02_segment" / "FC_prob.nrrd")).GetSpacing()[0] == pytest.approx(spacing)
+        record = json.loads((folder / "02_segment" / "provenance.json").read_text())
+        assert record["batch_size"] == 2 and record["status"] == "complete"
+        assert not (folder / "running.json").exists()
 
-    result = project.run(echo=lines.append)
+    # batch_size: 1 runs the cases one after another
+    pipeline = batch_pipeline()
+    project.run(from_step="preprocess", pipeline=pipeline, batch_size=1, echo=lambda text: None)
+    assert pipeline.segmenter.calls == [1, 1] and pipeline.registerer.calls == [1, 1]
 
-    assert [s.status for s in result] == ["Succeeded", "Failed", "Succeeded"]
-    assert result[1].failed_step == "preprocess"
-    assert "The process crashed (exit code 7)" in result[1].note
-    assert any("Starting a new worker process for the remaining 1 case." in line for line in lines)
-    summary = next((project.path / "logs").glob("*.summary.txt")).read_text()
-    assert "2 Succeeded, 1 Failed" in summary
+
+def test_failed_batch_fails_only_its_bad_case(project):
+    pipeline = batch_pipeline(fail=True)
+    result = project.run(pipeline=pipeline, echo=lambda text: None)
+    assert [s.status for s in result] == ["Succeeded", "Failed"]
+    assert result[1].failed_step == "segment" and result[1].note.endswith("RuntimeError: bad image")
+    assert pipeline.segmenter.calls == [2, 1, 1]  # the batch, then each case on its own
+    assert pipeline.registerer.calls == [1]  # the failed case goes no further
+
+
+def test_performance_params_do_not_make_outputs_outdated(project):
+    project.run(pipeline=make_pipeline(), echo=lambda text: None)
+    pipeline = make_pipeline(extractor=FastMeanThickness(chunk=1))
+    project.run(pipeline=pipeline, echo=lambda text: None)
+    pipeline = make_pipeline(extractor=FastMeanThickness(chunk=2))
+    assert statuses(project, pipeline) == {"1_00M_LEFT": "Succeeded", "2_00M_RIGHT": "Succeeded"}
+
+
+@dataclass
+class FastMeanThickness(MeanThickness):
+    performance_params: ClassVar[tuple[str, ...]] = ("chunk",)
+    chunk: int = 1

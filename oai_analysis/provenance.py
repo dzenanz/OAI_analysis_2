@@ -44,11 +44,14 @@ def sha256_json(value) -> str:
 
 
 def fingerprint(stage, inputs: dict[str, str]) -> str:
-    """What decides whether a step's outputs are up to date: the stage and the hashes of its inputs, by name."""
+    """
+    What decides whether a step's outputs are up to date: the stage and the hashes of its inputs, by name.
+    Parameters that only change how fast the stage runs (its performance_params) are left out.
+    """
     return sha256_json({
         "implementation": stage.name,
         "version": stage.version,
-        "params": stage.params(),
+        "params": stage.result_params(),
         "weights": stage.weights(),
         "inputs": inputs,
     })

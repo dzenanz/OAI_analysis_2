@@ -51,8 +51,9 @@ def main(argv=None):
     run_parser = commands.add_parser("run", parents=[selectors], help="Process the cases that are not up to date")
     run_parser.add_argument("--from", dest="from_step", metavar="STEP",
                             help="Redo this step, and the steps that use its outputs, even if up to date")
-    run_parser.add_argument("--in-process", action="store_true",
-                            help="Run the cases in this process (a crash then stops the batch)")
+    run_parser.add_argument("--batch-size", type=int, metavar="N",
+                            help="Cases whose images go through segmentation and registration together "
+                                 "(default: batch_size in project.yaml)")
     status_parser = commands.add_parser("status", parents=[selectors], help="Show the status of every case")
     status_parser.add_argument("--csv", help="Also write the table to this CSV file")
     args = parser.parse_args(argv)
@@ -88,7 +89,9 @@ def run(args):
 
     project = Project(args.project)
     case_ids = _selected(project, args, project.pipeline())
-    statuses = project.run([s.case_id for s in case_ids], args.from_step, in_process=args.in_process)
+    if args.batch_size is not None and args.batch_size < 1:
+        sys.exit("--batch-size must be at least 1")
+    statuses = project.run([s.case_id for s in case_ids], args.from_step, batch_size=args.batch_size)
     return 1 if any(s.status == FAILED for s in statuses) else 0
 
 

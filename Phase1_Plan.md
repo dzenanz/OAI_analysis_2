@@ -595,7 +595,7 @@ The refactor needs a reference before anything moves.
   - 2D thickness maps: agreement of the NaN masks and mean/95th-percentile abs diff, using ITK image comparison as the Dec 18 notes suggest
 
   It prints a pass/fail table with tolerances.
-- Run current `main` (`f198a2f`, venv11) on the **12 cases** in `pipeline.py:__main__` from `O:\OAI` plus the `colab_case`, **twice**. The two runs measure GPU run-to-run noise (uniGradICON fine-tuning is not deterministic), which sets the tolerances. Store the result as `M:\Dev\Osteoarthritis\OAI_golden_f198a2f\` (outside git) along with timings.
+- Run current `main` (`f198a2f`, venv11) on the **12 cases** in `pipeline.py:__main__` from `O:\OAI` plus the `colab_case`, **twice**. The two runs measure GPU run-to-run noise (uniGradICON fine-tuning is not deterministic), which sets the tolerances. Store the result as `M:\Dev\Osteoarthritis\Refactoring\OAI_golden_f198a2f\` (outside git) along with timings.
 - Done when: one command regenerates outputs and prints a comparison against the golden set.
 
 **Status: done** (2026-10-26, branch `regression-baseline`).
@@ -681,8 +681,8 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
 - `CaseArtifacts.seconds` records the wall time of each stage, and `tools/run_baseline.py` saves it per case in `run_info.json` (`--back-mapping` picks the mode).
 - New test: `test_split_cell_ids_match_split_mesh`. With no smoothing, the halves cut by cell id are identical to the halves from `split_mesh()`.
 - Verification (13 cases, against `OAI_golden_f198a2f/run1`):
-  - `back_mapping: transform`: 13/13 cases pass (`M:/Dev/Osteoarthritis/OAI_step2b_transform`).
-  - `back_mapping: cell_ids` (`M:/Dev/Osteoarthritis/OAI_step2b_cell_ids`): as expected, it does not pass the bit-compatibility tolerances. The files that differ are the thickness-related ones: `*_inner.vtk`, `*_outer.vtk`, `*_mesh_atlas.vtk`, `*_mapped_mesh.vtk` and `*_thickness.npy`. The probability maps, transforms and patient meshes are unchanged.
+  - `back_mapping: transform`: 13/13 cases pass (`M:/Dev/Osteoarthritis/Refactoring/OAI_step2b_transform`).
+  - `back_mapping: cell_ids` (`M:/Dev/Osteoarthritis/Refactoring/OAI_step2b_cell_ids`): as expected, it does not pass the bit-compatibility tolerances. The files that differ are the thickness-related ones: `*_inner.vtk`, `*_outer.vtk`, `*_mesh_atlas.vtk`, `*_mapped_mesh.vtk` and `*_thickness.npy`. The probability maps, transforms and patient meshes are unchanged.
   - Thickness maps: mean absolute difference 0.12–0.32 mm per map, 95th percentile 0.33–0.93 mm, maximum up to 3.8 mm. The halves are now the unsmoothed patient surface, about 0.3 mm from the smoothed surfaces used before.
   - Bias: femoral cartilage comes out thicker in every case, by +0.03 to +0.16 mm in the map mean (about +6%). Tibial cartilage has no consistent direction, from -0.09 to +0.10 mm. Over all 26 maps, the mean shift is +0.04 mm (+2.4%).
   - Time: the thickness stage averages 22.6 s per case with cell ids, against 24.3 s with the transform path (range 16–39 s against 19–40 s), about 7% faster. Whole cases average 214 s against 233 s. Registration takes about 200 s of each case, so that gap is mostly run-to-run noise in the registration stage rather than this change.
@@ -702,7 +702,7 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
 - New dependency: `pyyaml`. `tools/run_baseline.py` gained `--config` and records the config in `run_info.json`.
 - The project-level keys of 4.4 (`retention`, `storage`, data roots) are not accepted yet. They arrive with Step 4, which also decides how `project.yaml` holds them.
 - Verification:
-  - Since Step 2b the default `back_mapping` is `cell_ids`, which intentionally differs from the golden set. So the check used the full dumped default config with only `back_mapping: transform` changed (`M:/Dev/Osteoarthritis/OAI_step3_transform.yaml`): 13/13 cases and 195/195 files pass against `OAI_golden_f198a2f/run1` (`M:/Dev/Osteoarthritis/OAI_step3_config_transform`), at 234–314 s per case.
+  - Since Step 2b the default `back_mapping` is `cell_ids`, which intentionally differs from the golden set. So the check used the full dumped default config with only `back_mapping: transform` changed (`M:/Dev/Osteoarthritis/Refactoring/OAI_step3_transform.yaml`): 13/13 cases and 195/195 files pass against `OAI_golden_f198a2f/run1` (`M:/Dev/Osteoarthritis/Refactoring/OAI_step3_config_transform`), at 234–314 s per case.
   - `oai-analysis IMAGE OUT left --config` with a two-line partial config, on the colab case from an unrelated CWD, passes against the golden set.
   - `test/test_config.py` (12 tests): dump/load round trip, partial configs, error messages, the built-in registry, `config dump`, and a throwaway plugin package (a module plus a `.dist-info` with `entry_points.txt` on `sys.path`) whose stage is found through its entry point and named in a config. `pytest`: 29 passed; `test_SegmentationCPU` still fails as before.
 
@@ -737,7 +737,7 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
 - Found while testing: after a case wrote its thickness PNG with `pyplot`, Tk objects were garbage-collected on the heartbeat thread and Tk aborted the process (`Tcl_AsyncDelete: async handler deleted by the wrong thread`), once after the segmentation of the next case had hung for 11 minutes. `thickness_grid_png()` now draws on a plain matplotlib `Figure`, which needs no GUI toolkit, and the worker runs with `MPLBACKEND=Agg`.
 - New dependency: `pyarrow`.
 - Not done: recording the container image digest and setting/recording seeds (4.8). They fit with the Docker work.
-- Verification, on a 13-case project (`M:/Dev/Osteoarthritis/OAI_step4_project`: the 12 benchmark cases plus 9135902 left 0M, `back_mapping: transform`, `retention: all`):
+- Verification, on a 13-case project (`M:/Dev/Osteoarthritis/Refactoring/OAI_step4_project`: the 12 benchmark cases plus 9135902 left 0M, `back_mapping: transform`, `retention: all`):
   - Killed with `taskkill /F /T` during the registration of the 4th case. `status`: 3 Succeeded, 1 Incomplete (preprocessing and segmentation done), 9 Not started. The next `run` kept every finished step (provenance files unchanged) and finished the 4th case from registration.
   - In that run, 9021791 left 0M hit the Tk abort above (exit code 0x80000003): it was marked Failed at segmentation, a new worker processed the remaining 8 cases, and `run --failed` then finished it from segmentation. 9135902 left 0M failed at mesh generation (`IndexError`) both times without stopping the batch; the retry redid only that step.
   - `export_flat.py` + `compare_outputs.py` against `OAI_golden_f198a2f/run1`: 12/12 cases, 180/180 files pass.
@@ -758,7 +758,7 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
 - `Stage.performance_params` lists the parameters that change how fast a stage runs but not what it computes (`batch_size` of both networks). They are left out of the fingerprint, so changing them does not make outputs outdated.
   - Removing the U-Net's `batch_size` from its fingerprint makes earlier projects' segmentations Outdated once. `status` says so, rather than "its inputs changed".
 - What the stages print, warnings included, goes to the run's full log (`logs/RUN.log`), as it did with the worker. The console gets the progress and summary lines.
-- Verification, on a fresh copy of the 13-case project (`M:/Dev/Osteoarthritis/OAI_batch_project`, same `project.yaml`, which has `back_mapping: cell_ids`, batches of 8):
+- Verification, on a fresh copy of the 13-case project (`M:/Dev/Osteoarthritis/Refactoring/OAI_batch_project`, same `project.yaml`, which has `back_mapping: cell_ids`, batches of 8):
   - 12 cases succeeded. 9135902 left 0M failed at mesh generation (`IndexError`) without stopping the run.
   - The results pass against the Step 2b `cell_ids` run (12/12 cases, 180/180 files).
   - Each case took about 65 s, against about 4.5 min in Step 4. Average per step: preprocessing 6.5 s, segmentation 17.6 s (was 23.5), registration 11.1 s (was 180), mesh 1.9 s, thickness 21.8 s, atlas mapping 1.0 s.
@@ -800,7 +800,7 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
 
 - Left out: mesh self-intersection (VTK has no cheap self-intersection test; the 9021791 PR80 case is fine by every other measure), mesh island counts (they mirror the segmentation pieces), and the NaN fraction of the 2D map, which the atlas' shape fixes: 40.0% (FC) and 41.0% (TC) on every case.
 - Thumbnails (`oai_analysis/thumbnails.py`), in each case's `thumbnails/` folder: `segment_overlay.png` (the sagittal slice with the most cartilage, FC red, TC blue) and `atlas_map_FC.png` / `atlas_map_TC.png` (the 2D thickness maps on a fixed 0–5 mm scale, so cases compare). A failure to draw them is only logged.
-- Tuning, on `M:/Dev/Osteoarthritis/OAI_qc_project`: the 13 benchmark cases plus the 6 Dec 18 Group 3 cases they lacked (9094865 right 96M, 9103365 right 96M, 9135902 right 96M, 9530445 left 0M, left 36M, right 72M). 9103365 right 96M has two DESS series in the manifest; both are in, the second as `9103365_96M_RIGHT_B`.
+- Tuning, on `M:/Dev/Osteoarthritis/Refactoring/OAI_qc_project`: the 13 benchmark cases plus the 6 Dec 18 Group 3 cases they lacked (9094865 right 96M, 9103365 right 96M, 9135902 right 96M, 9530445 left 0M, left 36M, right 72M). 9103365 right 96M has two DESS series in the manifest; both are in, the second as `9103365_96M_RIGHT_B`.
   - The two checks that separate the Group 3 cases are segmentation pieces and the atlas surface without thickness. Clean cases stay at or below 0.7% outside the main pieces and 11.3% without thickness. Every Group 3 case is above 5% or 15% on at least one of them.
   - The other thresholds catch gross failures and flag none of the clean cases: uncertainty there is at most 0.23, correlation at least 0.83, folding at most 0.18%, thickness never above 5.2 mm.
 - Result (`status` after `run` rechecked the outputs): 10 Succeeded, 9 Needs Review, 1 Failed. All 9 Group 3 cases (counting 9103365's two series) need review. 9135902 left 0M fails at mesh generation as before. Group 2's 9016304 right 96M (the dent the old pipeline smoothed) needs review too, with 22.9% of its femoral cartilage outside the largest piece. The other 10 benchmark cases succeed. The 12-case project's own split is the same, since it holds those same outputs: 10 Succeeded, 2 Needs Review (9016304 left and right 96M), 1 Failed.
@@ -822,7 +822,7 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
   - The segmentation, registration and mesh checks moved into shared functions, so every implementation of a stage checks the same things.
 - `test/test_second_implementations.py` runs the colab case through a project twice, once with the defaults and once with all four second implementations, chosen only by `project.yaml`. Each time it checks the implementation recorded in each step's `provenance.json`. It needs a CUDA GPU and is skipped without one.
 
-**Comparison on the 13 benchmark cases.** Each variant is a copy of the Step 4 project (`M:/Dev/Osteoarthritis/OAI_step5_*`) with one stage changed in `project.yaml`. `run` redid only the changed step and the ones after it; for example, `gradicon_knee` left preprocessing, segmentation and meshing alone. Differences are on the 2D thickness maps, against the default project:
+**Comparison on the 13 benchmark cases.** Each variant is a copy of the Step 4 project (`M:/Dev/Osteoarthritis/Refactoring/OAI_step5_*`) with one stage changed in `project.yaml`. `run` redid only the changed step and the ones after it; for example, `gradicon_knee` left preprocessing, segmentation and meshing alone. Differences are on the 2D thickness maps, against the default project:
 
 | Variant | Succeeded / Needs Review / Failed (default: 10 / 2 / 1) | Step time, default → variant | Map abs diff, FC / TC (mean; mean 95th pct) | Mean thickness FC, TC (default 1.66, 1.63 mm) |
 |---|---|---|---|---|
@@ -862,7 +862,7 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
   - `gpu-tests` uses the cu128 build of torch (cu118 has no wheels for recent GPUs) and gains a `regression` job. That job runs `tools/run_baseline.py` with `--back-mapping transform` on the cases in the repository variable `OAI_REGRESSION_CASES` (default: the colab case) and compares them with the reference run in `OAI_REFERENCE_DIR`. It runs only when that variable is set, and uploads `comparison.md`.
 - Verification:
   - Full suite: 55 passed on the GPU, in 21 min (shared with the regression run). On a CPU only: 53 passed and the 2 `test_second_implementations` tests skipped, in 11.5 min. The CPU UNet test (6 min) and the smoke test (3.3 min) take most of that.
-  - The regression job's command on `test_case_left,9016304_0M_left` against `OAI_golden_f198a2f/run1`: 2/2 cases and 30/30 files pass (`M:/Dev/Osteoarthritis/OAI_step6_regression`).
+  - The regression job's command on `test_case_left,9016304_0M_left` against `OAI_golden_f198a2f/run1`: 2/2 cases and 30/30 files pass (`M:/Dev/Osteoarthritis/Refactoring/OAI_step6_regression`).
   - The workflows have not run on GitHub yet: that needs a push, and for `regression`, the variables and a reference run on the self-hosted runner.
 
 ### Step 7: Documentation and handoff (M1.4)

@@ -8,10 +8,10 @@ jobs:
     timeout-minutes: 90
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Set up Python 3.11
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: 3.11
         cache: pip
@@ -22,7 +22,7 @@ jobs:
         # separate packages in ITK 5.x, built into ITK 6, so not in the dependencies
         pip install itk-cuberille itk-parabolicmorphology
     - name: Cache network weights and test data
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.cache/oai-analysis
         key: oai-analysis-data-${{ hashFiles('oai_analysis/data.py') }}

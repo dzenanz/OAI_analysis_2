@@ -39,10 +39,10 @@ class MeshSplittingThickness(ThicknessEstimator):
     name: ClassVar[str] = "mesh_splitting"
     version: ClassVar[str] = "2"
     check_params: ClassVar[tuple[str, ...]] = ("max_thickness_mm", "max_too_thick")
-    smoothing_iterations: int = 150
-    island_distance_threshold_mm: float = 10.0
-    back_mapping: str = "cell_ids"
-    max_thickness_mm: float = 6.0
+    smoothing_iterations: int = 150  # smoothing passes over the atlas-space mesh before it is split
+    island_distance_threshold_mm: float = 10.0  # pieces farther than this from the atlas surface are dropped
+    back_mapping: str = "cell_ids"  # "cell_ids" or "transform", see above
+    max_thickness_mm: float = 6.0  # thicker than this is implausible
     max_too_thick: float = 0.01  # fraction of the vertices thicker than max_thickness_mm
 
     def __post_init__(self):
@@ -93,9 +93,9 @@ class DistanceTransformThickness(ThicknessEstimator):
 
     name: ClassVar[str] = "distance_transform"
     check_params: ClassVar[tuple[str, ...]] = ("max_thickness_mm", "max_too_thick")
-    distance_map_method: str = DistanceMapMethod.parabolic_morphology.value
-    max_thickness_mm: float = 6.0
-    max_too_thick: float = 0.01
+    distance_map_method: str = DistanceMapMethod.parabolic_morphology.value  # "parabolic_morphology" or "signed_maurer"
+    max_thickness_mm: float = 6.0  # thicker than this is implausible
+    max_too_thick: float = 0.01  # fraction of the vertices thicker than max_thickness_mm
 
     def run(self, mesh, probability, registration, atlas, structure):
         thickness_image, _, _ = compute_thickness(probability, method=DistanceMapMethod(self.distance_map_method))

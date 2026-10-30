@@ -23,11 +23,11 @@ class PrecomputedSegmenter(Segmenter):
     name: ClassVar[str] = "precomputed"
     check_params: ClassVar[tuple[str, ...]] = ("fc_volume_ml", "tc_volume_ml", "max_outside_main_pieces",
                                                "max_uncertainty")
-    path: str = "{case_id}/{structure}_prob.nrrd"
-    fc_volume_ml: tuple[float, float] = (4.0, 20.0)
-    tc_volume_ml: tuple[float, float] = (1.5, 8.0)
-    max_outside_main_pieces: float = 0.05
-    max_uncertainty: float = 0.3
+    path: str = "{case_id}/{structure}_prob.nrrd"  # template of each map's file, see above
+    fc_volume_ml: tuple[float, float] = (4.0, 20.0)  # usual range of the femoral cartilage volume
+    tc_volume_ml: tuple[float, float] = (1.5, 8.0)  # usual range of the tibial cartilage volume
+    max_outside_main_pieces: float = 0.05  # share of the volume outside the largest piece (FC) or two (TC)
+    max_uncertainty: float = 0.3  # mean of 1 - |2p - 1| over the cartilage
 
     def files(self, case: CaseInfo) -> dict[str, str]:
         """The file of each structure's map."""

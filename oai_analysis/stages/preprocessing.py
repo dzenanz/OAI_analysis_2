@@ -49,10 +49,10 @@ class OAIPreprocessor(Preprocessor):
 
     name: ClassVar[str] = "oai_default"
     check_params: ClassVar[tuple[str, ...]] = ("expected_spacing_mm", "expected_size")
-    window_min_percentile: float = 0.1
-    window_max_percentile: float = 99.9
-    expected_spacing_mm: tuple[float, float, float] = (0.365, 0.365, 0.7)  # OAI sagittal 3D DESS, within 10%
-    expected_size: tuple[int, int, int] = (384, 384, 160)
+    window_min_percentile: float = 0.1  # intensities at or below this percentile become 0
+    window_max_percentile: float = 99.9  # intensities at or above this percentile become 1
+    expected_spacing_mm: tuple[float, float, float] = (0.365, 0.365, 0.7)  # OAI sagittal 3D DESS; review if 10% off
+    expected_size: tuple[int, int, int] = (384, 384, 160)  # voxels, OAI sagittal 3D DESS; review if different
 
     def run(self, image: itk.Image, case: CaseInfo) -> itk.Image:
         image = into_canonical_orientation(image, case.laterality == "right")  # simplifies mesh processing

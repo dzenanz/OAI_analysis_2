@@ -16,8 +16,8 @@ class CuberilleMeshGenerator(MeshGenerator):
     """Cuberille iso-surface of the probability map, with vertices projected onto the iso-surface."""
 
     name: ClassVar[str] = "cuberille"
-    iso_surface_value: float = 0.5
-    project_vertex_surface_distance_threshold: float = 0.05
+    iso_surface_value: float = 0.5  # the probability where the surface is
+    project_vertex_surface_distance_threshold: float = 0.05  # how close (mm) a projected vertex gets to the surface
 
     def run(self, probability: itk.Image) -> vtk.vtkPolyData:
         itk_mesh = mp.get_mesh_from_probability_map(
@@ -34,8 +34,8 @@ class MarchingCubesMeshGenerator(MeshGenerator):
     """Marching cubes iso-surface of the probability map (scikit-image), optionally smoothed."""
 
     name: ClassVar[str] = "marching_cubes"
-    iso_surface_value: float = 0.5
-    smoothing_iterations: int = 0
+    iso_surface_value: float = 0.5  # the probability where the surface is
+    smoothing_iterations: int = 0  # smoothing passes over the surface; 0: none
 
     def run(self, probability: itk.Image) -> vtk.vtkPolyData:
         mesh = mp.marching_cubes_mesh(probability, self.iso_surface_value)

@@ -880,6 +880,23 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
 - `CHANGELOG.md` with two parts per release: the engineering changes, and a plain-language **"What might look different"** section for reviewers, backed by `oai-analysis compare` numbers on the benchmark cases.
 - A one-page reviewer guide for non-engineers: reading `status` and its CSV export, what *Needs Review* means, and what to send engineers when flagging a case (case ID, stage, note, screenshot).
 
+**Done** (2026-10-30, branch `refactor`).
+- `docs/`, plain Markdown:
+  - `README.md` (index)
+  - `install.md` (including the CUDA torch step, and the ITK 5 modules)
+  - `quickstart.md` (one image, then a project)
+  - `pipeline.md` (the steps in order, what each does and checks, the single-image command's files). The repository README's pipeline steps are rewritten to match and link to it, which closes the Dec 18 "update readme pipeline-steps" item.
+  - `projects.md` (layout, statuses, resume, fingerprints, provenance, sanity checks, retention)
+  - `config.md` (see below)
+  - `plugins.md` (the 4.5 example, which ran in a project, chosen by name in its config)
+  - `api.md`
+  - `handoff.md`: setup on Linux GPU servers, the manifest, a pilot batch, reading results, known problems (cuberille crash, the thickness change from Step 2b, registration noise, GPU/CPU differences, the version without a tag), the regression check, and where to change things.
+  - `reviewer_guide.md`: the statuses, what each kind of *Needs Review* note usually means, the thumbnails, and what to send engineers.
+- **Config reference.** `tools/config_reference.py` writes `docs/config.md` from the built-in stage classes: each stage's docstring, and each parameter's default and description, taken from the comment on its field. Parameters are marked *check* or *speed*. Every stage parameter now has such a comment. `test_config_reference_is_current` fails when the file is out of date (`--check`).
+- **Notebooks** are marked legacy in `notebooks/README.md`, which says what each shows and its state: `SegmentationDemo` is broken (it imports names `test_all.py` no longer has), `FullDemo` uses the deprecated `AnalysisObject`, and the other two do not use the package. Updating them to the new API is left for later.
+- **`CHANGELOG.md`**: "What might look different" in plain language (the Step 2b femoral thickness shift, with its numbers; nothing else changes; Needs Review; thumbnails; speed), then the engineering changes. The numbers come from `tools/compare_outputs.py`, since there is no `oai-analysis compare` command (4.6 planned one; `export_flat.py` + `compare_outputs.py` do the job).
+- Not done: the Docker recipe (Q9) and recording seeds and the container digest (4.8), which were left for the Docker work in Step 4.
+
 ---
 
 ## 7. Deliberately *not* in Phase 1

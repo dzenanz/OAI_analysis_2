@@ -13,7 +13,7 @@ class ThicknessMap2D(BiomarkerExtractor):
 
     name: ClassVar[str] = "thickness_map_2d"
     requires: ClassVar[tuple[str, ...]] = ("atlas_map",)
-    grid_resolution: int = 300
+    grid_resolution: int = 300  # grid points along each side of the 2D map
 
     def run(self, case: CaseArtifacts) -> dict[str, object]:
         outputs = {}

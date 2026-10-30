@@ -1,4 +1,7 @@
+import subprocess
+import sys
 import textwrap
+from pathlib import Path
 
 import pytest
 import yaml
@@ -120,3 +123,9 @@ def test_cli_config_dump(tmp_path, capsys):
                                                                                   "finetune_steps": 5,
                                                                                   "max_folding": 0.01,
                                                                                   "min_similarity": 0.75}
+
+
+def test_config_reference_is_current():
+    script = Path(__file__).resolve().parent.parent / "tools" / "config_reference.py"
+    result = subprocess.run([sys.executable, str(script), "--check"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr

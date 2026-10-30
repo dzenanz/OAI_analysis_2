@@ -8,6 +8,7 @@
 
 - [Installation](#installation)
 - [Introduction](#introduction)
+- [Documentation](#documentation)
 - [Development](#development)
 - [Citation](#citation)
 - [Acknowledgements](#acknowledgements)
@@ -37,22 +38,17 @@ broader community are, of course, not only welcome but encouraged.
 4. **2D thickness mapping**: Mapping of the thickness maps to a common 2D atlas space which provides full spatial correspondence. This is achieved via unrolling (based on a cylindrical coordinate system) for the femoral cartilage and a planar projection for the tibial cartilage.
 5. **Statistical analysis**: [Longitudinal statistical analysis approaches are planned]
 
-### Pipeline steps:
-1. Read image
- a. Read
- b. Put into canonical orientation
- c. Intensity preprocess (rescale to 0-1)
-2. Segment cartilage using deep learning  
-3. Register patient image to atlas image.  
-4. Transform patient mesh into atlas space using registration transform  
-5. Split the mesh into inner and outer surfaces in atlas space
-  a. Island filtering (keep largest + islands close to atlas mesh)
-  b. Mesh smoothing
-  c. Clustering into inner and outer surface
-6. Transform the inner and outer meshes back to patient space  
-7. Measuring the thickness by computing distances between inner and outer surfaces
-8. Transfer thicknesses from patient mesh to atlas mesh by iterating over atlas vertices and finding the closest patient vertex
-9. Project atlas mesh to 2D using precomputed mapping
+### Pipeline steps
+1. Preprocess: mirror right knees, orient the image like the atlas, scale the intensities to 0–1
+2. Segment the femoral and tibial cartilage with a 3D U-Net
+3. Register the image to the atlas image with uniGradICON
+4. Build each cartilage's surface
+5. Measure thickness: split the surface into inner and outer halves in atlas space, then measure the distance
+   between them on the original surface
+6. Carry the thickness onto the atlas surface (closest point)
+7. Unroll it into 2D thickness maps
+
+[docs/pipeline.md](docs/pipeline.md) describes each step and its outputs.
 
 ![OAI analysis workflow](doc_imgs/OAI_workflow.png)
 
@@ -69,6 +65,13 @@ We are currently working on the following features which should be available in 
 1. **Distributed processing**: Whereas *OAI Analysis* was set up for cluster computing via a simple SLURM script OAI Analysis 2 is moving toward using [Dask](https://dask.org/) to allow for parallel processing on clusters and the cloud.
 2. **Workflow management**: Whereas *OAI Analysis* used custom code to avoid recomputing results, we are switching to [Dagster](https://dagster.io/) to manage data dependencies in *OAI Analysis 2*. Current progress is [here](https://github.com/PaulHax/knee-sarg).
 3. **Distribution of analysis results**: As we are planning on not only distributing code, but also analysis results (such as segmentations, meshes, thickness maps) we are planning on supporting data access via the [Interplanetary File System (IPFS)](https://ipfs.io/).
+
+## Documentation
+
+The [documentation](docs/README.md) is in `docs/`: [install](docs/install.md), [quick start](docs/quickstart.md),
+[the pipeline](docs/pipeline.md), [projects](docs/projects.md), the [config reference](docs/config.md),
+[writing a plugin](docs/plugins.md), the [Python API](docs/api.md), a [handoff guide](docs/handoff.md) and a
+[reviewer guide](docs/reviewer_guide.md). Changes between versions are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Development
 

@@ -18,7 +18,7 @@ class UniGradICONRegisterer(Registerer):
 
     name: ClassVar[str] = "unigradicon"
     check_params: ClassVar[tuple[str, ...]] = ("max_folding", "min_similarity")
-    finetune_steps: int = 2
+    finetune_steps: int = 2  # steps of fine-tuning the network on each image pair; 0: none
     max_folding: float = 0.01  # fraction of the displacement field with a Jacobian determinant <= 0
     min_similarity: float = 0.75  # correlation of the warped image with the atlas image
 
@@ -48,9 +48,9 @@ class GradICONKneeRegisterer(Registerer):
 
     name: ClassVar[str] = "gradicon_knee"
     check_params: ClassVar[tuple[str, ...]] = ("max_folding", "min_similarity")
-    finetune_steps: int = 0
-    max_folding: float = 0.01
-    min_similarity: float = 0.75
+    finetune_steps: int = 0  # steps of fine-tuning the network on each image pair; 0: none
+    max_folding: float = 0.01  # fraction of the displacement field with a Jacobian determinant <= 0
+    min_similarity: float = 0.75  # correlation of the warped image with the atlas image
 
     def setup(self, device):
         # icon_registration places the network on its own configured device

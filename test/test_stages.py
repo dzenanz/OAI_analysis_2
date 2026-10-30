@@ -70,6 +70,8 @@ def test_preprocessor(laterality):
     result = preprocessor.run(image, CaseInfo("x.nii.gz", laterality))
 
     asl = itk.SpatialOrientationEnums.ValidCoordinateOrientations_ITK_COORDINATE_ORIENTATION_ASL
+    if hasattr(itk, "AnatomicalOrientation"):  # ITK 6
+        asl = itk.AnatomicalOrientation(asl)
     expected = itk.orient_image_filter(ball_image(), use_image_direction=True, desired_coordinate_orientation=asl)
     np.testing.assert_array_equal(itk.array_from_matrix(result.GetDirection()),
                                   itk.array_from_matrix(expected.GetDirection()))

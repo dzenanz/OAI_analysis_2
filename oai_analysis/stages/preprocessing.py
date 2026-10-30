@@ -18,6 +18,8 @@ def into_canonical_orientation(image, flip_left_right):
     :return: reoriented image
     """
     dicom_pir = itk.SpatialOrientationEnums.ValidCoordinateOrientations_ITK_COORDINATE_ORIENTATION_ASL
+    if hasattr(itk, "AnatomicalOrientation"):  # ITK 6 takes an AnatomicalOrientation, not the enum
+        dicom_pir = itk.AnatomicalOrientation(dicom_pir)
     if flip_left_right:
         image_dir = itk.array_from_matrix(image.GetDirection())
         image_dir[0, :] *= -1  # flip left-right

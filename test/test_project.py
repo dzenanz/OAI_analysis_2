@@ -1,5 +1,6 @@
 import json
 import textwrap
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import ClassVar
 
@@ -7,7 +8,7 @@ import itk
 import numpy as np
 import pytest
 
-from oai_analysis import OAPipeline, qc
+from oai_analysis import OAPipeline, provenance, qc
 from oai_analysis.atlas import Atlas
 from oai_analysis.project import Project, read_manifest
 from oai_analysis.stages import Preprocessor, QCFinding
@@ -386,3 +387,13 @@ def test_thumbnails(project):
     # the tiny atlas has no 2D embedding, so there are no thickness maps; that does not fail the case
     assert not list(folder.glob("atlas_map_*"))
     assert project.status(make_pipeline())[0].status == "Succeeded"
+
+
+def test_container_provenance(monkeypatch):
+    monkeypatch.setenv("OAI_ANALYSIS_IMAGE", "oai-analysis:1.0")
+    monkeypatch.setenv("OAI_ANALYSIS_IMAGE_DIGEST", "sha256:abc")
+    assert provenance.container() == {"image": "oai-analysis:1.0", "digest": "sha256:abc"}
+    monkeypatch.delenv("OAI_ANALYSIS_IMAGE")
+    monkeypatch.delenv("OAI_ANALYSIS_IMAGE_DIGEST")
+    if not Path("/.dockerenv").exists() and not Path("/run/.containerenv").exists():
+        assert provenance.container() is None

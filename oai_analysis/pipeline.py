@@ -6,10 +6,12 @@ analysis_pipeline() is the original entry point, kept with the same signature an
 import contextlib
 import functools
 import os
+import random
 import sys
 import time
 from dataclasses import dataclass, field
 
+import numpy as np
 import torch
 
 from oai_analysis import config, data, io
@@ -56,6 +58,24 @@ def default_device():
     return "cpu"
 
 
+def seed_random_generators(seed: int):
+    """Seed Python's, numpy's and torch's random number generators."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)  # also seeds every GPU
+
+
+def use_deterministic_algorithms():
+    """
+    Make torch choose deterministic algorithms where it has them; it warns about the operations that have none.
+    Slower. It needs CUBLAS_WORKSPACE_CONFIG set before CUDA starts, so call it before loading any network.
+    """
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    torch.use_deterministic_algorithms(True, warn_only=True)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
 class OAPipeline:
     """
     Computes cartilage thickness for femur and tibia from knee MRI.
@@ -73,7 +93,9 @@ class OAPipeline:
                  atlas_mapper: AtlasMapper | None = None,
                  biomarker_extractors: list[BiomarkerExtractor] | None = None,
                  atlas: Atlas | None = None,
-                 device: str | None = None):
+                 device: str | None = None,
+                 seed: int = 0,
+                 deterministic: bool = False):
         self.preprocessor = preprocessor or DEFAULT_STAGES["preprocessor"]()
         self.segmenter = segmenter or DEFAULT_STAGES["segmenter"]()
         self.registerer = registerer or DEFAULT_STAGES["registerer"]()
@@ -84,6 +106,8 @@ class OAPipeline:
                                      else [cls() for cls in DEFAULT_BIOMARKER_EXTRACTORS])
         self._atlas = atlas
         self.device = device
+        self.seed = seed  # each step starts from it, so a resumed case draws the same random numbers
+        self.deterministic = deterministic
         self._is_set_up = False
 
     @classmethod
@@ -98,7 +122,8 @@ class OAPipeline:
             stages[config.BIOMARKER_EXTRACTORS] = [config.stage_from_dict("biomarker_extractor", entry)
                                                    for entry in section[config.BIOMARKER_EXTRACTORS] or []]
         device = cfg.get("device", "auto")
-        return cls(**stages, atlas=atlas, device=None if device == "auto" else device)
+        return cls(**stages, atlas=atlas, device=None if device == "auto" else device, seed=cfg.get("seed", 0),
+                   deterministic=cfg.get("deterministic", False))
 
     def config(self) -> dict:
         """The full config of this pipeline; from_config() of it creates an identical pipeline."""
@@ -108,6 +133,8 @@ class OAPipeline:
                 config.BIOMARKER_EXTRACTORS: [config.stage_to_dict(e) for e in self.biomarker_extractors],
             },
             "device": self.device or "auto",
+            "seed": self.seed,
+            "deterministic": self.deterministic,
         }
 
     @property
@@ -140,6 +167,8 @@ class OAPipeline:
         if self._is_set_up:
             return
         self.device = self.device or default_device()
+        if self.deterministic:
+            use_deterministic_algorithms()
         for stage in self.stages:
             stage.setup(self.device)
         self._is_set_up = True
@@ -163,6 +192,7 @@ class OAPipeline:
 
     def run_step(self, step: "Step", result: CaseArtifacts) -> "StepOutputs":
         """Run one step, reading its inputs from result and storing its outputs in it."""
+        seed_random_generators(self.seed)
         case = result.case
         match step.name:
             case "preprocess":

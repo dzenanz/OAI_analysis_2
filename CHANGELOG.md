@@ -66,3 +66,9 @@ previous version (`f198a2f`).
 - **Tests and CI.** Unit tests per stage, a CPU smoke test of the whole pipeline, restored asserts, a CPU workflow
   with cached downloads, and a GPU workflow with an optional regression job (`tools/run_baseline.py`).
 - **Documentation** in `docs/`.
+- **Reproducibility.** `seed` (default 0) seeds the random number generators at every step; `deterministic: true`
+  uses torch's deterministic algorithms, which cuts the run-to-run differences of registration about 70-fold and
+  makes it about 5 times slower. Both are recorded in provenance.
+- **Docker.** A `Dockerfile` for an image with CUDA PyTorch and the network weights, which runs offline. Provenance
+  records the image, the git commit it was built from, and its digest when given (`OAI_ANALYSIS_IMAGE_DIGEST`). The
+  `docker` workflow builds it and runs the smoke test in it.

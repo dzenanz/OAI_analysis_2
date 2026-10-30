@@ -363,7 +363,7 @@ class Project:
                        for key, sha in inputs.items()},
             "fingerprint": provenance.fingerprint(step.stage, inputs),
             "software": provenance.software(),
-            "environment": provenance.environment(pipeline.device),
+            "environment": provenance.environment(pipeline.device, pipeline.seed, pipeline.deterministic),
             "run_id": run_id,
             "qc": [],
             "started": provenance.now(),

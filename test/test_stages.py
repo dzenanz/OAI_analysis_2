@@ -1,9 +1,11 @@
+import random
 from dataclasses import dataclass
 from typing import ClassVar
 
 import itk
 import numpy as np
 import pytest
+import torch
 import vtk
 from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
 
@@ -272,3 +274,25 @@ def test_pipeline_without_intermediates(fake_pipeline, tmp_path):
     fake_pipeline.run_case(CaseInfo(input_path, "right"), tmp_path / "out", keep_intermediate_outputs=False)
 
     assert [p.name for p in (tmp_path / "out").iterdir()] == ["mean_thickness.npy"]
+
+
+@dataclass
+class RandomNumbers(BiomarkerExtractor):
+    name: ClassVar[str] = "random_numbers"
+
+    def run(self, case):
+        return {"random.npy": np.array([random.random(), np.random.random(), torch.rand(1).item()])}
+
+
+def test_each_step_is_seeded(fake_pipeline, tmp_path):
+    input_path = tmp_path / "input.nrrd"
+    itk.imwrite(ball_image(), str(input_path))
+    fake_pipeline.biomarker_extractors = [RandomNumbers()]
+
+    first = fake_pipeline.run_case(CaseInfo(input_path, "left")).biomarkers["random.npy"]
+    second = fake_pipeline.run_case(CaseInfo(input_path, "left")).biomarkers["random.npy"]
+    fake_pipeline.seed = 1
+    other_seed = fake_pipeline.run_case(CaseInfo(input_path, "left")).biomarkers["random.npy"]
+
+    np.testing.assert_array_equal(first, second)
+    assert not np.array_equal(first, other_seed)

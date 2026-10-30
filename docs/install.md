@@ -70,3 +70,38 @@ pytest            # in a clone; about 12 min on a CPU, the GPU-only tests are sk
 
 `pytest` runs the whole pipeline on the bundled test case (`test/test_smoke.py`), so a pass means the installation
 works end to end.
+
+## Docker
+
+The `Dockerfile` builds an image with CUDA PyTorch, the package, the ITK 5 modules and the network weights, so it
+runs without internet access. The host needs the NVIDIA driver (570 or newer for the default CUDA 12.8 build) and
+the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/) for `--gpus`.
+
+Build it from the repository root. The build has no `.git`, so it is given the version and the commit:
+
+```
+pip install setuptools-scm
+docker build -t oai-analysis:$(git rev-parse --short HEAD) --build-arg VERSION=$(python -m setuptools_scm) --build-arg GIT_COMMIT=$(git rev-parse HEAD) .
+```
+
+`--build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu126` picks another CUDA build of PyTorch, for older
+drivers.
+
+The image's command is `oai-analysis`, and its working folder is `/data`. Mount the images and the projects:
+
+```
+docker run --gpus all -v /data:/data oai-analysis:TAG /data/IMAGE.nii.gz /data/out left
+docker run --gpus all -v /data:/data oai-analysis:TAG init /data/oai_projects/pilot --manifest /data/manifest.csv --data-root /data/OAI
+docker run --gpus all -v /data:/data oai-analysis:TAG run /data/oai_projects/pilot
+```
+
+Each step's `provenance.json` then names the image and the git commit it was built from. An image cannot know its
+own digest, so pass it in to have it recorded too:
+
+```
+docker run --gpus all -e OAI_ANALYSIS_IMAGE_DIGEST=$(docker inspect --format "{{.Id}}" oai-analysis:TAG) -v /data:/data oai-analysis:TAG run /data/oai_projects/pilot
+```
+
+On clusters that run Apptainer (Singularity) rather than Docker, convert the image with
+`apptainer build oai-analysis.sif docker-daemon://oai-analysis:TAG` and run it with `apptainer run --nv` (not
+tested yet). The network weights are in the image, so it needs no write access outside the mounted folders.

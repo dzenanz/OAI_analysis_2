@@ -19,6 +19,8 @@ device: cuda
 |---|---|---|
 | `pipeline` | | The stages, below. |
 | `device` | `auto` | `cuda`, `cuda:1`, `cpu` or `auto`. `auto` uses the GPU, and a project stops if there is none rather than run on the CPU (much slower) without being asked. |
+| `seed` | `0` | Python's, numpy's and torch's random number generators start from it at each step, so a case draws the same random numbers however it is run, resumed or batched. Recorded in provenance. |
+| `deterministic` | `false` | Use torch's deterministic algorithms where it has them. Slower, and the registration on a GPU still varies a little between runs (see [projects](projects.md#reproducibility)). Recorded in provenance. |
 
 These are read by a project (`oai-analysis init` writes them to `project.yaml`), not by the single-image command:
 

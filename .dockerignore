@@ -1,0 +1,11 @@
+# The image needs only the package and its metadata; everything else stays out of the build context
+*
+!pyproject.toml
+!README.md
+!LICENSE
+!oai_analysis
+oai_analysis/data
+oai_analysis/network_weights
+oai_analysis/pretrained_OAI_model
+oai_analysis/gradICON_oai_halfres_weights
+**/__pycache__

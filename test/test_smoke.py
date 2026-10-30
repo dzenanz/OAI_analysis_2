@@ -3,6 +3,7 @@ A smoke test of the whole pipeline on the colab case that needs no GPU: the prob
 (PrecomputedSegmenter), so the segmentation network does not run, and the other stages are the defaults.
 """
 import json
+import os
 
 import numpy as np
 import torch
@@ -30,6 +31,12 @@ def test_colab_case(tmp_path):
     folder = project.case_folder("colab")
     record = json.loads(next(folder.glob("*_segment/provenance.json")).read_text())
     assert record["implementation"] == "precomputed"
+    assert record["environment"]["seed"] == 0
+    if os.environ.get("OAI_ANALYSIS_IMAGE"):  # in the Docker image, provenance names the image and the commit
+        assert record["environment"]["container"] == {"image": os.environ["OAI_ANALYSIS_IMAGE"],
+                                                      "digest": os.environ.get("OAI_ANALYSIS_IMAGE_DIGEST")}
+        if os.environ.get("OAI_ANALYSIS_GIT_COMMIT"):
+            assert record["software"]["git_commit"] == os.environ["OAI_ANALYSIS_GIT_COMMIT"]
     for s, expected in EXPECTED_MEAN_THICKNESS.items():
         grid = np.load(folder / "07_biomarkers" / "thickness_map_2d" / f"{s}_thickness.npy")
         assert abs(np.nanmean(grid) - expected) < 0.02, s

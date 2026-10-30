@@ -131,7 +131,7 @@ Two kinds of parameters do not count, and the [config reference](config.md) mark
 | `inputs`, `outputs` | the files read and written, with their sha256 |
 | `fingerprint` | see above |
 | `software` | versions of oai-analysis, Python, torch, ITK, VTK, ..., the git commit, and whether it had uncommitted changes |
-| `environment` | host, platform, device, GPU, CUDA version, the command |
+| `environment` | host, platform, device, GPU, CUDA version, the command, `seed`, `deterministic`, and the `container` image and digest when run in one |
 | `run_id`, `started`, `finished`, `duration_s` | when, and how long; `run_id` names the run's log in `logs/` |
 | `qc` | the sanity-check findings: severity (`info`, `review`, `fail`), code, plain-English message, measured value |
 
@@ -161,6 +161,25 @@ finish and marks it Needs Review. An *info* finding only records a measured valu
 The thresholds were tuned on the regression benchmark cases and the cases a Dec 2024 manual review found to have
 problems: those problem cases are all flagged, and the clean ones are not. They are stage parameters, so each
 project can change them in `project.yaml`.
+
+## Reproducibility
+
+Everything before registration (preprocessing, segmentation) gives exactly the same results every time on the same
+machine. Registration does not: uniGradICON is fine-tuned on each case, and some GPU operations it uses add up
+numbers in a varying order. Two runs of the same case differ by 0.035 mm on average in the 2D maps (0.12 mm at the
+95th percentile, up to 2.6 mm at single points).
+
+- `seed` (default 0) seeds Python's, numpy's and torch's random number generators at the start of every step, so a
+  case draws the same random numbers whether it runs in one go, is resumed, or runs in a batch.
+- `deterministic: true` makes torch use deterministic algorithms where it has them. On the bundled case, two runs then
+  differed by 0.0005 mm on average (0.002 mm at the 95th percentile, up to 1.1 mm at single points), about 70 times
+  less. Two of the operations registration needs (`grid_sampler_3d_backward`, `avg_pool3d_backward`) have no
+  deterministic version on the GPU, which is the difference that remains. Registration took about 5 times as long
+  (163–183 s against 36 s); the other steps took the same time.
+- Results still differ slightly between GPUs, drivers and library versions, and between a GPU and the CPU.
+
+Both settings, and the container image when run in one (see [Docker](install.md#docker)), are recorded in every
+`provenance.json`.
 
 ## Retention and storage
 

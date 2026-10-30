@@ -8,6 +8,8 @@ Pipeline configuration as plain data, read from and written to YAML.
       biomarker_extractors:
         - {name: thickness_map_2d, grid_resolution: 300}
     device: auto
+    seed: 0
+    deterministic: false
 
 Each stage is chosen by its registered name (see registry.py), and the other keys are its parameters.
 Anything left out takes its default, and a stage given without a name keeps the default implementation,
@@ -23,7 +25,7 @@ from oai_analysis import registry
 SINGLE_STAGES = ("preprocessor", "segmenter", "registerer", "mesh_generator", "thickness_estimator", "atlas_mapper")
 BIOMARKER_EXTRACTORS = "biomarker_extractors"
 PROJECT_KEYS = ("data_root", "batch_size", "retention", "storage")  # used by a project (see project.py), not by the pipeline
-TOP_LEVEL_KEYS = ("pipeline", "device", *PROJECT_KEYS)
+TOP_LEVEL_KEYS = ("pipeline", "device", "seed", "deterministic", *PROJECT_KEYS)
 
 
 def load(source) -> dict:

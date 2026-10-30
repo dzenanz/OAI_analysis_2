@@ -5,7 +5,8 @@ and what to watch out for.
 
 ## 1. Set up the environment
 
-Follow [install](install.md). On a Linux GPU server or cluster node:
+Follow [install](install.md), or use the [Docker image](install.md#docker), which has the weights in it. On a Linux
+GPU server or cluster node:
 
 ```
 python3.11 -m venv ~/oai-env && source ~/oai-env/bin/activate
@@ -72,7 +73,7 @@ by patient range), each with its own `run`.
 |---|---|---|
 | **Cuberille crash.** On some cases ITK's cuberille filter fails, e.g. 9135902, left knee, 0M. | The case fails at mesh generation with `IndexError: invalid vector subscript`, or the whole process crashes (segmentation fault). | The case shows Failed, or after a crash Incomplete, and `run` resumes the rest. A newer ITKCuberille may fix it. Meanwhile, the `marching_cubes` mesh generator gets through this case and agrees with cuberille to within 0.03–0.08 mm. Use it for the failed cases in a separate project, or for all cases. |
 | **Smoothing and thickness.** The original pipeline measured thickness on smoothed surfaces moved back from atlas space, about 0.3 mm from the real surface on average. | Since this refactor the thickness is measured on the original, unsmoothed surface (`back_mapping: cell_ids`). Femoral cartilage comes out about 6% thicker (0.03–0.16 mm) than in older results. | Do not mix results from before and after this change without accounting for it. `thickness_estimator: {back_mapping: transform}` reproduces the old method. See [CHANGELOG.md](../CHANGELOG.md). |
-| **Registration is not deterministic.** uniGradICON's fine-tuning varies from run to run. | Thickness maps of the same case differ by 0.035 mm on average between runs (0.12 mm at the 95th percentile, up to 2.6 mm at single points). | Expected. Everything before registration is exactly reproducible. |
+| **Registration is not deterministic.** uniGradICON's fine-tuning varies from run to run. | Thickness maps of the same case differ by 0.035 mm on average between runs (0.12 mm at the 95th percentile, up to 2.6 mm at single points). | Expected. Everything before registration is exactly reproducible. `deterministic: true` cuts the difference about 70-fold, but makes registration about 5 times slower; see [reproducibility](projects.md#reproducibility). |
 | **GPU and CPU differ slightly.** | The segmentation probabilities differ by up to 0.0025 between GPU and CPU. | Expected, and too small to matter. |
 | **Cases flagged Needs Review.** In the benchmark cases and a Dec 2024 manual review, flagged cases had segmentation pieces outside the cartilage, or holes in the thickness. | The case finishes, with a note. | Look at its thumbnails; see the [reviewer guide](reviewer_guide.md). Thresholds can be changed per project. |
 | **A run on a machine without a GPU.** | `run` stops: "No CUDA GPU is available". | Check `torch.cuda.is_available()`. To run on the CPU on purpose, set `device: cpu` in `project.yaml`. |

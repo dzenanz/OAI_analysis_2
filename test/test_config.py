@@ -129,3 +129,10 @@ def test_config_reference_is_current():
     script = Path(__file__).resolve().parent.parent / "tools" / "config_reference.py"
     result = subprocess.run([sys.executable, str(script), "--check"], capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_seed_and_deterministic_settings():
+    pipeline = OAPipeline.from_config({"seed": 7, "deterministic": True})
+    assert (pipeline.seed, pipeline.deterministic) == (7, True)
+    assert {"seed": 7, "deterministic": True}.items() <= pipeline.config().items()
+    assert (OAPipeline().seed, OAPipeline().deterministic) == (0, False)

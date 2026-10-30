@@ -8,6 +8,7 @@ import datetime
 import functools
 import hashlib
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -80,7 +81,9 @@ def software() -> dict:
 def _git() -> dict:
     """The commit and whether there are uncommitted changes, when running from a git checkout."""
     if not (PACKAGE_DIR.parent / ".git").exists():
-        return {}
+        # a container image has no checkout; its build records the commit (see Dockerfile)
+        commit = os.environ.get("OAI_ANALYSIS_GIT_COMMIT")
+        return {"git_commit": commit, "git_dirty": False} if commit else {}
     def git(*args):
         return subprocess.run(["git", *args], cwd=PACKAGE_DIR.parent, capture_output=True, text=True).stdout.strip()
     try:
@@ -91,7 +94,7 @@ def _git() -> dict:
 
 
 @functools.cache
-def environment(device: str) -> dict:
+def environment(device: str, seed: int = 0, deterministic: bool = False) -> dict:
     import torch
 
     gpu = None
@@ -104,7 +107,21 @@ def environment(device: str) -> dict:
         "gpu": gpu,
         "torch_cuda": torch.version.cuda,
         "command": " ".join(sys.argv),
+        "seed": seed,
+        "deterministic": deterministic,
+        **({"container": image} if (image := container()) else {}),
     }
+
+
+def container() -> dict | None:
+    """
+    The container image this runs in, if any. The image sets OAI_ANALYSIS_IMAGE to its name and version; `docker
+    run -e OAI_ANALYSIS_IMAGE_DIGEST=...` adds the digest, which an image cannot know about itself.
+    """
+    image, digest = os.environ.get("OAI_ANALYSIS_IMAGE"), os.environ.get("OAI_ANALYSIS_IMAGE_DIGEST")
+    if not (image or digest or Path("/.dockerenv").exists() or Path("/run/.containerenv").exists()):
+        return None
+    return {"image": image, "digest": digest}
 
 
 def now() -> str:

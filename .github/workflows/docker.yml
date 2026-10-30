@@ -1,0 +1,37 @@
+name: docker
+
+# Builds the image and runs the CPU smoke test inside it, when the image's recipe or the dependencies change
+on:
+  push:
+    paths: [Dockerfile, .dockerignore, pyproject.toml, .github/workflows/docker.yml]
+  pull_request:
+    paths: [Dockerfile, .dockerignore, pyproject.toml, .github/workflows/docker.yml]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0  # the version comes from git tags
+    - name: Make room for the CUDA libraries
+      run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v7
+      with:
+        python-version: 3.11
+    - name: Build the image
+      run: |
+        pip install setuptools-scm
+        docker build -t oai-analysis:ci \
+          --build-arg VERSION=$(python -m setuptools_scm) --build-arg GIT_COMMIT=$(git rev-parse HEAD) .
+        docker image ls oai-analysis:ci
+    - name: Run the command line
+      run: docker run --rm oai-analysis:ci config dump
+    - name: Run the smoke test in the image
+      run: |
+        docker run --rm -v "$PWD/test:/tests:ro" -e OAI_ANALYSIS_IMAGE_DIGEST=ci --entrypoint bash oai-analysis:ci \
+          -c "pip install --user --no-cache-dir pytest && python -m pytest /tests/test_smoke.py -p no:cacheprovider"

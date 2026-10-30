@@ -27,9 +27,12 @@ class Atlas:
     @classmethod
     def load(cls, atlas_dir):
         atlas_dir = Path(atlas_dir)
+        image = itk.imread(atlas_dir / "atlas_image.nii.gz", itk.F)
+        # the file has NaN voxels, which ITK 5 read as 0 and ITK 6 keeps; registration needs them 0
+        np.nan_to_num(itk.array_view_from_image(image), copy=False, nan=0.0)
         return cls(
             name=atlas_dir.name,
-            image=itk.imread(atlas_dir / "atlas_image.nii.gz", itk.F),
+            image=image,
             inner_mesh={s: mp.read_vtk_mesh(atlas_dir / f"atlas_{s}_inner_mesh_LPS.ply") for s in STRUCTURES},
             embedding_2d={s: np.load(atlas_dir / f"{s}_inner_embedded.npy") for s in STRUCTURES},
         )

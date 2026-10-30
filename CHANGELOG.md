@@ -38,8 +38,9 @@ previous version (`f198a2f`).
 - **Package.** Installable with `pip` from any directory; Python 3.11 or newer; Apache-2.0 license in
   `pyproject.toml` too; dependency ranges instead of exact pins; version from git tags. Network weights and test
   data download, with checksums, into a per-user cache (`OAI_ANALYSIS_DATA` overrides it) instead of the working
-  directory. The atlas is part of the package. `itk-cuberille` and `itk-parabolicmorphology` are no longer
-  dependencies, because ITK 6 includes them; with ITK 5.x, install them separately.
+  directory. The atlas is part of the package. ITK (`itk`, `itk-cuberille`, `itk-parabolicmorphology`) is in
+  the optional `itk` extra, `pip install "oai-analysis[itk]"`, so that a local build of ITK 6 can be used instead.
+  Works with ITK 5.4 and ITK 6.
 - **Stages.** The pipeline is seven steps, each done by a replaceable stage class with its parameters as fields
   (`oai_analysis/stages/`). `OAPipeline` runs them in a fixed order and loads the networks once. See
   [the pipeline](docs/pipeline.md) and the [Python API](docs/api.md).

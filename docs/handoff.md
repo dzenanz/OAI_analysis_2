@@ -11,7 +11,7 @@ GPU server or cluster node:
 ```
 python3.11 -m venv ~/oai-env && source ~/oai-env/bin/activate
 pip install torch --index-url https://download.pytorch.org/whl/cu128   # match the node's CUDA driver
-pip install oai-analysis itk-cuberille itk-parabolicmorphology
+pip install "oai-analysis[itk]"
 export OAI_ANALYSIS_DATA=/shared/oai-analysis-data                       # optional: one shared download
 python -c "import torch; print(torch.cuda.get_device_name(0))"
 ```

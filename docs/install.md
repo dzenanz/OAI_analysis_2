@@ -31,7 +31,7 @@ python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_
 From PyPI:
 
 ```
-pip install oai-analysis
+pip install "oai-analysis[itk]"
 ```
 
 or from a clone, for development (adds pytest and the linters):
@@ -39,14 +39,14 @@ or from a clone, for development (adds pytest and the linters):
 ```
 git clone https://github.com/uncbiag/OAI_analysis_2
 cd OAI_analysis_2
-pip install -e ".[dev]"
+pip install -e ".[dev,itk]"
 ```
 
-With ITK 5.x (the version on PyPI), also install two ITK modules that ITK 6 includes:
-
-```
-pip install itk-cuberille itk-parabolicmorphology
-```
+The `itk` extra installs ITK from PyPI with the two modules the pipeline needs that ITK 5.x ships separately
+(`itk-cuberille`, `itk-parabolicmorphology`). To use your own build of ITK 6, which includes them, leave the extra
+out and make the build importable in the environment. Note that `icon_registration` requires `itk` itself, so pip
+installs the PyPI `itk` anyway unless it is already there; installing with `--no-deps` and then the other
+dependencies avoids that.
 
 ## 4. Data and network weights
 

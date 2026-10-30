@@ -27,8 +27,7 @@ ARG VERSION=0.0.0+unknown
 ARG GIT_COMMIT=
 COPY pyproject.toml README.md LICENSE /src/
 COPY oai_analysis /src/oai_analysis
-RUN SETUPTOOLS_SCM_PRETEND_VERSION=${VERSION} pip install --no-cache-dir /src \
-        itk-cuberille itk-parabolicmorphology \
+RUN SETUPTOOLS_SCM_PRETEND_VERSION=${VERSION} pip install --no-cache-dir "/src[itk]" \
     && pip freeze > /opt/pip-freeze.txt \
     && rm -rf /src
 

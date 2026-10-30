@@ -17,8 +17,10 @@
 ## Installation
 
 ```console
-pip install oai-analysis
+pip install "oai-analysis[itk]"
 ```
+
+Leave out `[itk]` to use your own build of ITK (see [install](docs/install.md#3-the-package)).
 
 Python 3.11 or newer is required.
 
@@ -80,13 +82,13 @@ Contributions are appreciated and welcome.
 ```
 git clone https://github.com/uncbiag/OAI_analysis_2
 cd OAI_analysis_2
-pip install -e ".[dev]"
+pip install -e ".[dev,itk]"
 pytest
 ```
 
 Python 3.11 or newer is required. For GPU processing, install the CUDA build of PyTorch first,
 following https://pytorch.org/get-started/locally/.
-With ITK 5.x, also `pip install itk-cuberille itk-parabolicmorphology` (ITK 6 includes them).
+With your own build of ITK, leave out `itk` from the extras.
 
 `pytest` needs no GPU: the tests that do (`test/test_second_implementations.py`) are skipped without CUDA, and
 `test/test_smoke.py` runs the whole pipeline on the bundled case with precomputed probability maps.

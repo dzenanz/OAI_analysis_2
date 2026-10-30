@@ -19,9 +19,7 @@ jobs:
     - name: Install dependencies
       run: |
         pip install torch --index-url https://download.pytorch.org/whl/cu128
-        pip install -e ".[dev]"
-        # separate packages in ITK 5.x, built into ITK 6, so not in the dependencies
-        pip install itk-cuberille itk-parabolicmorphology
+        pip install -e ".[dev,itk]"
     - name: Test with pytest
       run: |
         pytest --durations=10
@@ -46,8 +44,7 @@ jobs:
     - name: Install dependencies
       run: |
         pip install torch --index-url https://download.pytorch.org/whl/cu128
-        pip install -e ".[dev]"
-        pip install itk-cuberille itk-parabolicmorphology
+        pip install -e ".[dev,itk]"
     - name: Run the benchmark cases and compare with the reference
       # back_mapping: transform is the f198a2f pipeline's; the default (cell_ids) intentionally differs from it
       run: |

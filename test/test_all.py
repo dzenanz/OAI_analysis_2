@@ -2,6 +2,7 @@ import unittest
 
 import itk
 import oai_analysis.registration
+from oai_analysis import qc
 from oai_analysis.data import test_data_dir as data_dir
 from oai_analysis.algorithms import mesh_processing as mp
 from oai_analysis.atlas import Atlas
@@ -25,15 +26,13 @@ class TestOAIAnalysis(unittest.TestCase):
         probability = segmenter.run(input_image)
         FC, TC = probability["FC"], probability["TC"]
 
-        print('Segmentation Done')
-        print(FC.shape, TC.shape)
-        #np.save('FC_map.npy', FC)
-        #np.save('TC_map.npy', TC)
-        #print(np.sum(itk.ComparisonImageFilter(FC, correct_FC_segmentation)))
-        #print(np.sum(itk.ComparisonImageFilter(TC, correct_TC_segmentation)))
-
-        self.assertLess(np.sum(itk.comparison_image_filter(FC, correct_FC_segmentation)) , 12)
-        self.assertLess(np.sum(itk.comparison_image_filter(TC, correct_TC_segmentation)) , 12)
+        # The reference maps were made on a CPU, which reproduces them to 1e-5; a GPU differs by up to 0.0025
+        for result, correct in ((FC, correct_FC_segmentation), (TC, correct_TC_segmentation)):
+            result, correct = itk.array_from_image(result), itk.array_from_image(correct)
+            self.assertLess(np.abs(result - correct).max(), 0.005)
+            inside, correct_inside = result > 0.5, correct > 0.5
+            dice = 2 * (inside & correct_inside).sum() / (inside.sum() + correct_inside.sum())
+            self.assertGreater(dice, 0.999)
 
     def test_MeshThicknessCPU(self):
         input_image = itk.imread(self.data / "colab_case" / "image_preprocessed.nii.gz", itk.D)
@@ -67,47 +66,33 @@ class TestOAIAnalysis(unittest.TestCase):
         fc_inner_atlas, fc_outer_atlas = mp.get_split_mesh(fc_mesh, inner_mesh_fc_atlas, mesh_type='FC')
         fc_inner, fc_outer = mp.get_distance(fc_inner_atlas, fc_outer_atlas)
         distance_inner_FC = mp.get_itk_mesh(fc_inner)
-        print(distance_inner_FC)
 
         tc_mesh_itk = mp.get_mesh_from_probability_map(warped_image_TC)
         tc_mesh = mp.itk_mesh_to_vtk_mesh(tc_mesh_itk)
         tc_inner_atlas, tc_outer_atlas = mp.get_split_mesh(tc_mesh, inner_mesh_tc_atlas, mesh_type='TC')
         tc_inner, tc_outer = mp.get_distance(tc_inner_atlas, tc_outer_atlas)
         distance_inner_TC = mp.get_itk_mesh(tc_inner)
-        print(distance_inner_TC)
 
-        print("Thickness computation completed")
-
-        #assert(64800 <= distance_inner_FC.GetNumberOfPoints() <= 65000)
-        #assert(20460 <= distance_inner_TC.GetNumberOfPoints() <= 20480)
+        # 55366 and 19329 points on a GPU, 55406 and 19323 on a CPU
+        self.assertTrue(55200 <= distance_inner_FC.GetNumberOfPoints() <= 55600)
+        self.assertTrue(19250 <= distance_inner_TC.GetNumberOfPoints() <= 19400)
 
     def test_RegistrationCPU(self):
         input_image = itk.imread(self.data / "colab_case" / "image_preprocessed.nii.gz")
 
-        correct_registration = itk.imread(self.data / "colab_case" / "avsm" / "inv_transform_to_atlas.nii.gz")
+        atlas_image = Atlas.default().image
 
-        registration = oai_analysis.registration.ICON_Registration().register(input_image, Atlas.default().image)
+        registration = oai_analysis.registration.ICON_Registration().register(input_image, atlas_image)
 
-        #registration object is an itk transform. Need to verify that it is correct in test, but it appears correct
-        print(registration)
-        #self.assertFalse(np.sum(itk.ComparisonImageFilter(registration, correct_registration)) > 1)
+        # avsm/inv_transform_to_atlas.nii.gz is from a different registration method, so it is no reference;
+        # check instead that the transform does not fold space and brings the image onto the atlas
+        self.assertLess(qc.folding_fraction(registration), 0.01)
+        self.assertGreater(qc.similarity_to_atlas(input_image, atlas_image, registration), 0.75)
 
 class TestImports(unittest.TestCase):
 
     def test_ImportsCPU(self):
         from oai_analysis import OAPipeline, CaseInfo
-
-class TestICONRegistration(unittest.TestCase):
-    def setUp(self):
-        self.data = data_dir()
-
-    def test_RegistrationCPU(self):
-        ICON_obj = oai_analysis.registration.ICON_Registration()
-
-        image_A = itk.imread(self.data / "colab_case" / "image_preprocessed.nii.gz")
-        image_B = Atlas.default().image
-
-        ICON_obj.register(image_A, image_B)
 
 if __name__ == "__main__":
     unittest.main()

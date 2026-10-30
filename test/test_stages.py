@@ -15,9 +15,12 @@ from oai_analysis.stages import (
     BiomarkerExtractor,
     CaseInfo,
     CuberilleMeshGenerator,
+    DistanceTransformThickness,
+    MarchingCubesMeshGenerator,
     MeshGenerator,
     MeshResult,
     OAIPreprocessor,
+    PrecomputedSegmenter,
     Preprocessor,
     RegistrationResult,
     Registerer,
@@ -78,6 +81,67 @@ def test_cuberille_mesh_generator():
     points = vtk_to_numpy(mesh.GetPoints().GetData())
     radii = np.linalg.norm(points - points.mean(axis=0), axis=1)
     np.testing.assert_allclose(radii, 6.0, atol=0.5)
+
+
+def test_marching_cubes_mesh_generator():
+    image = ball_image(radius_mm=6.0)
+    image.SetOrigin([1.0, 2.0, 3.0])
+    mesh = MarchingCubesMeshGenerator().run(image)
+    points = vtk_to_numpy(mesh.GetPoints().GetData())
+    centre = np.array([1.0, 2.0, 3.0]) + (32 - 1) * 0.5 / 2
+    np.testing.assert_allclose(points.mean(axis=0), centre, atol=0.1)
+    np.testing.assert_allclose(np.linalg.norm(points - centre, axis=1), 6.0, atol=0.5)
+    mass = vtk.vtkMassProperties()
+    mass.SetInputData(mesh)
+    mass.Update()
+    assert mass.GetVolume() > 0  # the faces point outward
+
+
+def slab_image(thickness_mm=2.5, spacing=0.5):
+    """A float image with value 1 inside a square slab, thickness_mm thick in z, and 0 outside."""
+    z, y, x = np.mgrid[:40, :40, :40] * spacing
+    inside = (np.abs(z - 10) < thickness_mm / 2 + 0.25) & (x > 3) & (x < 16) & (y > 3) & (y < 16)
+    image = itk.image_from_array(inside.astype(np.float32))
+    image.SetSpacing([spacing] * 3)
+    return image
+
+
+def test_distance_transform_thickness():
+    image = slab_image()
+    mesh = MarchingCubesMeshGenerator().run(image)
+
+    result = DistanceTransformThickness().run(mesh, image, None, None, "FC")
+
+    points = vtk_to_numpy(result.mesh.GetPoints().GetData())
+    thickness = vtk_to_numpy(result.mesh.GetPointData().GetArray("vertex_thickness"))
+    middle = (np.abs(points[:, 0] - 9.5) < 3) & (np.abs(points[:, 1] - 9.5) < 3)
+    assert middle.sum() > 50
+    # the distance map measures the slab from voxel edge to voxel edge, one voxel more than between the surfaces
+    np.testing.assert_allclose(thickness[middle], 3.0, atol=0.01)
+
+
+def test_precomputed_segmenter(tmp_path):
+    image = ball_image()
+    image.SetOrigin([1.0, 2.0, 3.0])
+    coarse = itk.image_from_array(itk.array_from_image(image)[::2, ::2, ::2].copy())
+    coarse.SetSpacing([1.0] * 3)
+    coarse.SetOrigin([1.0, 2.0, 3.0])
+    for s in ("FC", "TC"):
+        (tmp_path / "9016304" / "LEFT").mkdir(parents=True, exist_ok=True)
+        itk.imwrite(coarse, tmp_path / "9016304" / "LEFT" / f"{s}.nrrd")
+    segmenter = PrecomputedSegmenter(path=str(tmp_path / "{patient_id}" / "{LATERALITY}" / "{structure}.nrrd"))
+    case = CaseInfo("x.nii.gz", "left", details={"patient_id": "9016304"})
+
+    probability = segmenter.run(image, case)
+
+    assert sorted(probability) == ["FC", "TC"]
+    fc = probability["FC"]
+    assert itk.size(fc) == itk.size(image) and itk.origin(fc) == itk.origin(image)
+    assert itk.spacing(fc) == itk.spacing(image)
+    agreement = (itk.array_from_image(fc) > 0.5) == (itk.array_from_image(image) > 0.5)
+    assert agreement.mean() > 0.95
+    with pytest.raises(ValueError, match="needs the case"):
+        segmenter.run(image)
 
 
 def test_transform_mesh_keeps_thickness():

@@ -83,6 +83,11 @@ pytest
 
 Python 3.11 or newer is required. For GPU processing, install the CUDA build of PyTorch first,
 following https://pytorch.org/get-started/locally/.
+With ITK 5.x, also `pip install itk-cuberille itk-parabolicmorphology` (ITK 6 includes them).
+
+`pytest` needs no GPU: the tests that do (`test/test_second_implementations.py`) are skipped without CUDA, and
+`test/test_smoke.py` runs the whole pipeline on the bundled case with precomputed probability maps.
+`tools/run_baseline.py` runs the regression benchmark cases and compares them with a reference run.
 
 Network weights and test data are downloaded on first use into a per-user cache directory
 (on Windows `%LOCALAPPDATA%\oai-analysis\oai-analysis\Cache`, on Linux `~/.cache/oai-analysis`).

@@ -8,8 +8,7 @@ on:
 jobs:
   test-linux:
     runs-on: [self-hosted, linux]
-    strategy:
-      max-parallel: 5
+    timeout-minutes: 60
 
     steps:
     - uses: actions/checkout@v4
@@ -19,8 +18,47 @@ jobs:
         python-version: 3.11
     - name: Install dependencies
       run: |
-        pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+        pip install torch --index-url https://download.pytorch.org/whl/cu128
         pip install -e ".[dev]"
+        # separate packages in ITK 5.x, built into ITK 6, so not in the dependencies
+        pip install itk-cuberille itk-parabolicmorphology
     - name: Test with pytest
       run: |
-        pytest
+        pytest --durations=10
+
+  # Runs the Step 0 regression check (tools/run_baseline.py) and compares the outputs with a reference run.
+  # Set these repository variables to enable it:
+  #   OAI_REFERENCE_DIR  a reference run on the runner, e.g. a copy of OAI_golden_f198a2f/run1
+  #   OAI_DIR            the OAI dataset root on the runner (only needed for OAI cases)
+  #   OAI_REGRESSION_CASES  comma-separated cases (default: the bundled colab case, test_case_left)
+  regression:
+    runs-on: [self-hosted, linux]
+    needs: test-linux
+    if: vars.OAI_REFERENCE_DIR != ''
+    timeout-minutes: 60
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.11
+    - name: Install dependencies
+      run: |
+        pip install torch --index-url https://download.pytorch.org/whl/cu128
+        pip install -e ".[dev]"
+        pip install itk-cuberille itk-parabolicmorphology
+    - name: Run the benchmark cases and compare with the reference
+      # back_mapping: transform is the f198a2f pipeline's; the default (cell_ids) intentionally differs from it
+      run: |
+        python tools/run_baseline.py "$RUNNER_TEMP/regression" --oai-dir "${{ vars.OAI_DIR }}" \
+          --cases "${{ vars.OAI_REGRESSION_CASES || 'test_case_left' }}" --back-mapping transform \
+          --compare-to "${{ vars.OAI_REFERENCE_DIR }}"
+    - name: Keep the comparison
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: regression-comparison
+        path: |
+          ${{ runner.temp }}/regression/comparison.md
+          ${{ runner.temp }}/regression/run_info.json

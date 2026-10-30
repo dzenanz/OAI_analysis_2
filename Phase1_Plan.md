@@ -843,6 +843,28 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
 - Restore the commented-out asserts.
 - A GPU job on the self-hosted runner that runs Step 0 on 1–2 cases.
 
+**Done** (2026-10-30, branch `refactor`).
+- Unit tests on small synthetic images for the stages that had none:
+  - `marching_cubes`: the surface of a ball sits where the ball is in physical space, and its faces point outward.
+  - `distance_transform`: a slab reads its thickness.
+  - `precomputed`: fills the path template from `cases.csv` columns, resamples a coarser map onto the image, and refuses to run without the case.
+
+  The registerers and `mesh_splitting` need the atlas and real data, so the tests below cover them.
+- `test/test_smoke.py` runs the whole pipeline as a project on the colab case with `precomputed` and the default other stages. It checks the 2D maps' mean thickness within 0.02 mm of the expected values: 2.286 (FC) and 2.258 (TC). Over 5 GPU and 2 CPU runs the spread was 0.002 mm. On a CPU it takes about 3.5 min here, so it needs no GPU. A project refuses to run on a CPU unless asked, so the test sets `device` by what the machine has.
+- Restored asserts in `test/test_all.py`:
+  - `test_SegmentationCPU` compares by max abs diff (< 0.005) and Dice (> 0.999), instead of the sum of the ITK comparison image (< 12) that failed. The reference maps were made on a CPU: a CPU reproduces them to 3e-6, a GPU differs by up to 0.0023. So the old failure was the GPU, not a regression.
+  - The mesh point counts are restored with today's values: 55366/19329 on a GPU, 55406/19323 on a CPU. The old 64800–65000 and 20460–20480 predate the Sep 2026 dependency update.
+  - The registration test checks folding (< 1%) and similarity to the atlas (> 0.75). `avsm/inv_transform_to_atlas.nii.gz` is from a different method, so it can't be a reference.
+  - Removed the duplicate `TestICONRegistration`.
+- CI:
+  - `cpu-test` (GitHub-hosted) installs the CPU build of torch (no CUDA wheels to download) and caches pip and the network weights and test data (`~/.cache/oai-analysis`, keyed on `data.py`).
+  - Both workflows install `itk-cuberille` and `itk-parabolicmorphology` explicitly, since 9d843c1 took them out of the dependencies for ITK 6.
+  - `gpu-tests` uses the cu128 build of torch (cu118 has no wheels for recent GPUs) and gains a `regression` job. That job runs `tools/run_baseline.py` with `--back-mapping transform` on the cases in the repository variable `OAI_REGRESSION_CASES` (default: the colab case) and compares them with the reference run in `OAI_REFERENCE_DIR`. It runs only when that variable is set, and uploads `comparison.md`.
+- Verification:
+  - Full suite: 55 passed on the GPU, in 21 min (shared with the regression run). On a CPU only: 53 passed and the 2 `test_second_implementations` tests skipped, in 11.5 min. The CPU UNet test (6 min) and the smoke test (3.3 min) take most of that.
+  - The regression job's command on `test_case_left,9016304_0M_left` against `OAI_golden_f198a2f/run1`: 2/2 cases and 30/30 files pass (`M:/Dev/Osteoarthritis/OAI_step6_regression`).
+  - The workflows have not run on GitHub yet: that needs a push, and for `regression`, the variables and a reference run on the self-hosted runner.
+
 ### Step 7: Documentation and handoff (M1.4)
 
 - Plain Markdown in `docs/`, readable on GitHub with no build step (Q5), with these pages:

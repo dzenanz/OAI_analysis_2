@@ -386,6 +386,31 @@ def get_mesh(itk_image, num_iterations=150):
     mesh = smooth_mesh(mesh, num_iterations=num_iterations)
     return mesh
 
+def marching_cubes_mesh(image: itk.Image, level=0.5) -> vtk.vtkPolyData:
+    """
+    The iso-surface of the image at level, by marching cubes, in physical space, with its faces facing out (as
+    cuberille's do; splitting the cartilage into inner and outer surfaces relies on it).
+    """
+    import skimage.measure
+
+    array = np.asarray(itk.array_view_from_image(image), dtype=np.float32)  # z, y, x
+    verts, faces, _, _ = skimage.measure.marching_cubes(array, level=level)
+    direction = itk.array_from_matrix(image.GetDirection())
+    points = np.asarray(image.GetOrigin()) + (verts[:, ::-1] * np.asarray(image.GetSpacing())) @ direction.T
+    a, b, c = points[faces[:, 0]], points[faces[:, 1]], points[faces[:, 2]]
+    if np.einsum("ij,ij->i", a, np.cross(b, c)).sum() < 0:  # negative signed volume: the faces face in
+        faces = faces[:, ::-1]
+    cells = vtk.vtkCellArray()
+    cells.SetData(ns.numpy_to_vtk(np.arange(0, 3 * len(faces) + 1, 3, dtype=np.int64), deep=True),
+                  ns.numpy_to_vtk(faces.astype(np.int64).ravel(), deep=True))
+    vtk_points = vtk.vtkPoints()
+    vtk_points.SetData(ns.numpy_to_vtk(points, deep=True))
+    mesh = vtk.vtkPolyData()
+    mesh.SetPoints(vtk_points)
+    mesh.SetPolys(cells)
+    return mesh
+
+
 # To obtain mesh from itk image probability map
 def get_mesh_from_probability_map(image: itk.Image, iso_surface_value=0.5,
                                   project_vertex_surface_distance_threshold=0.05) -> itk.Mesh:

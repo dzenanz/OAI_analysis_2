@@ -125,7 +125,7 @@ class FakePreprocessor(Preprocessor):
 class FakeSegmenter(Segmenter):
     name: ClassVar[str] = "fake"
 
-    def run(self, image):
+    def run(self, image, case=None):
         return {"FC": image, "TC": image}
 
 

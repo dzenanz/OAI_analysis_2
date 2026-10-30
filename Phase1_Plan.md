@@ -810,6 +810,32 @@ Proposed placement: **right after Step 2**, as one commit on `MeshSplittingThick
 - `GradICONKneeRegisterer`, `DistanceTransformThickness`, `PrecomputedSegmenter`, and optionally `MarchingCubesMeshGenerator`.
 - Done when: the config-only switching test from section 5 passes, and there is a short comparison write-up on the benchmark cases.
 
+**Done** (2026-10-29, branch `refactor`).
+- New stages, each chosen by name in a config:
+  - `gradicon_knee` (`GradICONKneeRegisterer`): the GradICON OAI-knee model from `registration.gradicon_knee_model()`. `finetune_steps: 0` (the default) uses the network as trained, as the pipeline did before uniGradICON.
+  - `precomputed` (`PrecomputedSegmenter`): reads each structure's probability map from `path`, a template filled in with `{structure}`, `{case_id}`, `{laterality}`, `{LATERALITY}` and the columns of `cases.csv`, e.g. `{patient_id}` and `{month}`. It resamples the maps onto the preprocessed image. The files are not part of the fingerprint, so after they change, use `run --from segment`.
+  - `marching_cubes` (`MarchingCubesMeshGenerator`): scikit-image marching cubes, written anew in `mp.marching_cubes_mesh()`. The old `mp.get_mesh()` ignored the image's origin and direction, smoothed the surface and dropped pieces under 3000 cells. The new function places vertices in physical space and turns the faces outward, as cuberille's are (the inner/outer split relies on the normals). Smoothing is an option, off by default.
+  - `distance_transform` already existed (Step 1).
+- Interface changes:
+  - `Segmenter.run(image, case=None)` now receives the case, which `PrecomputedSegmenter` needs to find its files. Segmenters that ignore it work as before.
+  - `CaseInfo.details` carries a project's `cases.csv` row.
+  - The segmentation, registration and mesh checks moved into shared functions, so every implementation of a stage checks the same things.
+- `test/test_second_implementations.py` runs the colab case through a project twice, once with the defaults and once with all four second implementations, chosen only by `project.yaml`. Each time it checks the implementation recorded in each step's `provenance.json`. It needs a CUDA GPU and is skipped without one.
+
+**Comparison on the 13 benchmark cases.** Each variant is a copy of the Step 4 project (`M:/Dev/Osteoarthritis/OAI_step5_*`) with one stage changed in `project.yaml`. `run` redid only the changed step and the ones after it; for example, `gradicon_knee` left preprocessing, segmentation and meshing alone. Differences are on the 2D thickness maps, against the default project:
+
+| Variant | Succeeded / Needs Review / Failed (default: 10 / 2 / 1) | Step time, default → variant | Map abs diff, FC / TC (mean; mean 95th pct) | Mean thickness FC, TC (default 1.66, 1.63 mm) |
+|---|---|---|---|---|
+| `gradicon_knee` | 9 / 3 / 1 | 14.4 s → 8.2 s | 0.23 mm / 0.26 mm; 0.81 / 0.84 | 1.66, 1.57 mm |
+| `distance_transform` | 10 / 2 / 1 | 20.6 s → 12.8 s | 0.87 mm / 1.00 mm; 1.96 / 2.08 | 2.53, 2.63 mm |
+| `marching_cubes` | 11 / 2 / 0 | 2.0 s → 1.2 s | 0.04 mm / 0.05 mm; 0.13 / 0.16 | 1.66, 1.62 mm |
+| `precomputed` (Step 0 golden maps) | 10 / 2 / 1 | 17.8 s → 7.4 s | 0.00 / 0.00 | 1.66, 1.63 mm |
+
+- **`precomputed`** reproduces the default results to the hundredth of a millimetre from the maps of the original pipeline (`OAI_golden_f198a2f/run1`). 9135902 left 0M fails because that run has no maps for it.
+- **`marching_cubes`** agrees with cuberille to 0.03–0.08 mm per case, and it gets through 9135902 left 0M, the case where cuberille fails (IndexError).
+- **`gradicon_knee`** stays close on most cases (0.1–0.2 mm). The largest differences are in 9040390, the case the Dec 18 triage put down to registration (uniGradICON vs ICON), and in the tibial cartilage of Group 3's 9016304 left 96M (1.43 → 1.00 mm). It flags 9040390 right 96M: no tibial thickness on 17.9% of the atlas surface. Its correlation with the atlas is lower on 9016304 left 96M (0.708, against 0.778 with uniGradICON).
+- **`distance_transform`** measures a different quantity: about 0.9 mm (around 55%) thicker on every case. It is consistent between cases but not comparable with the mesh-based thickness. Its QC flags match the default's.
+
 ### Step 6: Tests and CI (ongoing from Step 1)
 
 - Unit tests per stage on small data.

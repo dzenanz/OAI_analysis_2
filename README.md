@@ -115,6 +115,15 @@ oai-analysis IMAGE OUTPUT_DIR left --config my_config.yaml
 ```
 or `OAPipeline.from_config("my_config.yaml")` in Python.
 
+The stages that come with oai-analysis, by the name a config uses (defaults first):
+
+| Stage | Implementations |
+|---|---|
+| `segmenter` | `unet3d_oai`; `precomputed`: probability maps from files, e.g. `{path: "D:/old_run/{case_id}/{structure}_prob.nrrd"}` |
+| `registerer` | `unigradicon`; `gradicon_knee`: GradICON trained on OAI knees, the registration used before uniGradICON |
+| `mesh_generator` | `cuberille`; `marching_cubes` |
+| `thickness_estimator` | `mesh_splitting`; `distance_transform`: from a distance map of the segmentation |
+
 Other packages can add stages that a config can then name: decorate the stage class with
 `@oai_analysis.registry.register`, and declare the module in an entry point:
 ```toml

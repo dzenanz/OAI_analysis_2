@@ -225,11 +225,11 @@ class RecordingSegmenter(FakeSegmenter):
     calls: list = field(default_factory=list)
     fail: bool = False
 
-    def run(self, image):
+    def run(self, image, case=None):
         self.calls.append(("segment", case_of(image)))
         if self.fail and case_of(image) == "2_00M_RIGHT":
             raise RuntimeError("bad image")
-        return super().run(image)
+        return super().run(image, case)
 
 
 @dataclass

@@ -140,7 +140,7 @@ class Project:
         from oai_analysis.stages import CaseInfo
 
         row = self.cases[case_id]
-        return CaseInfo(self.input_path(case_id), row["laterality"], case_id)
+        return CaseInfo(self.input_path(case_id), row["laterality"], case_id, details=dict(row))
 
     def input_path(self, case_id) -> Path:
         path = Path(self.cases[case_id]["input"])

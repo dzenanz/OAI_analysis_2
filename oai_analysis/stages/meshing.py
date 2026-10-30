@@ -25,5 +25,29 @@ class CuberilleMeshGenerator(MeshGenerator):
         return mp.itk_mesh_to_vtk_mesh(itk_mesh)
 
     def check(self, case: CaseArtifacts) -> list[QCFinding]:
-        return [QCFinding("fail", "mesh.empty", f"the {qc.STRUCTURE_NAMES[s]} surface is empty", 0.0)
-                for s, mesh in case.mesh.items() if qc.mesh_is_empty(mesh)]
+        return mesh_findings(case)
+
+
+@register
+@dataclass
+class MarchingCubesMeshGenerator(MeshGenerator):
+    """Marching cubes iso-surface of the probability map (scikit-image), optionally smoothed."""
+
+    name: ClassVar[str] = "marching_cubes"
+    iso_surface_value: float = 0.5
+    smoothing_iterations: int = 0
+
+    def run(self, probability: itk.Image) -> vtk.vtkPolyData:
+        mesh = mp.marching_cubes_mesh(probability, self.iso_surface_value)
+        if self.smoothing_iterations:
+            mesh = mp.smooth_mesh(mesh, num_iterations=self.smoothing_iterations)
+        return mesh
+
+    def check(self, case: CaseArtifacts) -> list[QCFinding]:
+        return mesh_findings(case)
+
+
+def mesh_findings(case: CaseArtifacts) -> list[QCFinding]:
+    """The check of any mesh generator: the surfaces are not empty."""
+    return [QCFinding("fail", "mesh.empty", f"the {qc.STRUCTURE_NAMES[s]} surface is empty", 0.0)
+            for s, mesh in case.mesh.items() if qc.mesh_is_empty(mesh)]

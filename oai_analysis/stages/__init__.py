@@ -18,8 +18,8 @@ from oai_analysis.stages.base import (
 )
 from oai_analysis.stages.atlas_mapping import ClosestPointAtlasMapper
 from oai_analysis.stages.biomarkers import ThicknessMap2D
-from oai_analysis.stages.meshing import CuberilleMeshGenerator
+from oai_analysis.stages.meshing import CuberilleMeshGenerator, MarchingCubesMeshGenerator
 from oai_analysis.stages.preprocessing import OAIPreprocessor
-from oai_analysis.stages.registration import UniGradICONRegisterer
-from oai_analysis.stages.segmentation import UNetSegmenter
+from oai_analysis.stages.registration import GradICONKneeRegisterer, UniGradICONRegisterer
+from oai_analysis.stages.segmentation import PrecomputedSegmenter, UNetSegmenter
 from oai_analysis.stages.thickness import DistanceTransformThickness, MeshSplittingThickness

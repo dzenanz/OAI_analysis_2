@@ -29,6 +29,7 @@ class CaseInfo:
     input: str | Path  # image file, or a directory holding a DICOM series
     laterality: str  # "left" or "right"
     case_id: str | None = None  # defaults to the name of the input
+    details: dict = field(default_factory=dict)  # anything else known about the case, e.g. patient_id and month
 
     def __post_init__(self):
         if self.laterality not in LATERALITIES:
@@ -109,8 +110,11 @@ class Segmenter(Stage):
     kind: ClassVar[str] = "segmenter"
 
     @abstractmethod
-    def run(self, image: itk.Image) -> dict[str, itk.Image]:
-        """Return probability maps keyed by structure: {"FC": ..., "TC": ...}."""
+    def run(self, image: itk.Image, case: CaseInfo | None = None) -> dict[str, itk.Image]:
+        """
+        Return probability maps keyed by structure: {"FC": ..., "TC": ...}, on the grid of the preprocessed image.
+        case says which knee the image is of; most segmenters need only the image.
+        """
 
 
 class Registerer(Stage):

@@ -3,11 +3,11 @@ from typing import ClassVar
 
 import itk
 
-from oai_analysis import qc
 from oai_analysis.data import models_dir, models_sha256
 from oai_analysis.registry import register
+from oai_analysis.stages.segmentation.checks import segmentation_findings
 from oai_analysis.stages.segmentation.segmenter import Segmenter3DInPatchClassWise
-from oai_analysis.stages.base import CaseArtifacts, QCFinding, Segmenter
+from oai_analysis.stages.base import CaseArtifacts, CaseInfo, QCFinding, Segmenter
 
 
 @register
@@ -42,29 +42,10 @@ class UNetSegmenter(Segmenter):
     def weights(self):
         return {"oai-analysis-models.tar.gz": f"sha256:{models_sha256}"}
 
-    def run(self, image: itk.Image) -> dict[str, itk.Image]:
+    def run(self, image: itk.Image, case: CaseInfo | None = None) -> dict[str, itk.Image]:
         FC_prob, TC_prob = self._segmenter.segment(image, if_output_prob_map=True, if_output_itk=True)
         return {"FC": FC_prob, "TC": TC_prob}
 
     def check(self, case: CaseArtifacts) -> list[QCFinding]:
-        findings = []
-        for structure, probability in case.probability.items():
-            name = qc.STRUCTURE_NAMES[structure]
-            measures = qc.segmentation_measures(probability, structure)
-            volume = measures["volume_ml"]
-            if volume == 0:
-                findings.append(QCFinding("fail", "segment.empty", f"no {name} was found in the image", 0.0))
-                continue
-            low, high = self.fc_volume_ml if structure == "FC" else self.tc_volume_ml
-            findings.append(qc.finding(not low <= volume <= high, "segment.volume",
-                                       f"the {name} volume is {volume:.1f} ml (usual: {low}-{high} ml)", volume))
-            outside = measures["outside_main_pieces"]
-            pieces = "largest piece" if qc.EXPECTED_PIECES[structure] == 1 else "two largest pieces"
-            findings.append(qc.finding(outside > self.max_outside_main_pieces, "segment.pieces",
-                                       f"{qc.percent(outside)} of the {name} is outside its {pieces} "
-                                       f"(review above {qc.percent(self.max_outside_main_pieces)})", outside))
-            uncertainty = measures["uncertainty"]
-            findings.append(qc.finding(uncertainty > self.max_uncertainty, "segment.uncertainty",
-                                       f"the network's uncertainty about the {name} is {uncertainty:.3f} "
-                                       f"(review above {self.max_uncertainty})", uncertainty))
-        return findings
+        return segmentation_findings(case, self.fc_volume_ml, self.tc_volume_ml, self.max_outside_main_pieces,
+                                     self.max_uncertainty)

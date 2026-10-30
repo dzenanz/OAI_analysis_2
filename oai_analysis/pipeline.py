@@ -174,7 +174,7 @@ class OAPipeline:
                 return StepOutputs({"image": result.image})
             case "segment":
                 print("Segmenting the cartilage")
-                result.probability = self.segmenter.run(result.image)
+                result.probability = self.segmenter.run(result.image, case)
                 return StepOutputs({f"{s}_prob": result.probability[s] for s in STRUCTURES})
             case "register":
                 print("Registering the input image to the atlas")

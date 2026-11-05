@@ -24,6 +24,10 @@ M:/OAI_projects/pilot/
   from a config file; otherwise it holds the full default pipeline config.
 - `cases.csv` can be edited, e.g. to add cases. `input` is a file or a DICOM folder, relative to `data_root` (or
   absolute). Case IDs from a manifest look like `9016304_96M_LEFT`; any unique ID works.
+- **A visit with several scans of the same knee** (208 knee visits in the full OAI manifest, mostly repeat scans
+  from the same session) gets one: the series with the most voxels, then the one acquired last, since a scan is
+  usually repeated because the first one had a problem. A warning names the series used and those skipped. The
+  same happens if a case ID appears twice in an edited `cases.csv`.
 - `index.parquet` is rewritten after every case. Read it with `pandas.read_parquet` or DuckDB.
 
 ### A case's folder

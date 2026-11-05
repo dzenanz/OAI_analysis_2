@@ -35,6 +35,7 @@ import sys
 import threading
 import time
 import traceback
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -93,7 +94,7 @@ class Project:
         self.storage = storage
         if not isinstance(self.settings["batch_size"], int) or self.settings["batch_size"] < 1:
             raise ValueError(f"batch_size must be a positive whole number, not {self.settings['batch_size']!r}")
-        self.cases = _read_cases(self.path / "cases.csv")
+        self.cases = _read_cases(self.path / "cases.csv", self.settings["data_root"] or self.path)
 
     # creating a project
 
@@ -101,7 +102,8 @@ class Project:
     def create(cls, path, cases=(), pipeline_config=None, data_root=None, retention="checkpoints") -> "Project":
         """
         Create a project folder. cases are dicts with the CASE_COLUMNS; inputs are relative to data_root
-        (or to the project folder) unless absolute. pipeline_config is a config dict or YAML file (see config.py).
+        (or to the project folder) unless absolute. A case listed more than once gets one input (see
+        choose_series). pipeline_config is a config dict or YAML file (see config.py).
         """
         from oai_analysis.pipeline import OAPipeline
 
@@ -118,13 +120,16 @@ class Project:
         }
         path.mkdir(parents=True, exist_ok=True)
         (path / "project.yaml").write_text(config.dump(settings), encoding="utf-8")
-        _write_cases(path / "cases.csv", list(cases))
+        _write_cases(path / "cases.csv", choose_series(list(cases), data_root if data_root is not None else path))
         return cls(path)
 
     @classmethod
     def from_manifest(cls, path, manifest, data_root, patients=None, months=None, laterality=None,
                       pipeline_config=None) -> "Project":
-        """Create a project from a knee-sarg manifest (patient_id, study_uid, vol_path, month, study_description)."""
+        """
+        Create a project from a knee-sarg manifest (patient_id, study_uid, vol_path, month, study_description).
+        A case with several series gets one of them (see choose_series).
+        """
         return cls.create(path, read_manifest(manifest, patients, months, laterality), pipeline_config, data_root)
 
     # cases and their folders
@@ -425,6 +430,44 @@ def read_manifest(manifest, patients=None, months=None, laterality=None) -> list
     return cases
 
 
+def choose_series(cases, data_root) -> list[dict]:
+    """
+    One row per case_id. When a case has several inputs (e.g. a repeated scan), keep the one with the most voxels,
+    then the one acquired last (a scan is usually repeated because the first one had a problem), and warn.
+    Inputs are relative to data_root unless absolute.
+    """
+    by_id = {}
+    for case in cases:
+        by_id.setdefault(case["case_id"], []).append(case)
+    chosen = {}
+    for case_id, rows in by_id.items():
+        if len(rows) == 1:
+            chosen[case_id] = rows[0]
+            continue
+        keys, unreadable = [], []
+        for position, row in enumerate(rows):
+            try:
+                voxels, acquired = io.size_and_acquisition(Path(data_root or ".") / row["input"])
+            except Exception:  # e.g. data_root not mounted; the row can still be chosen
+                voxels, acquired = -1, None
+                unreadable.append(row["input"])
+            keys.append((voxels, acquired or ("", 0.0), position))  # the last row wins a tie
+        best = max(range(len(rows)), key=keys.__getitem__)
+        if unreadable:
+            reason = f"could not read {', '.join(unreadable)}"
+        elif len({k[0] for k in keys}) > 1:
+            reason = f"most voxels: {keys[best][0]}"
+        elif keys[best][1][0]:
+            reason = "acquired last"
+        else:
+            reason = "no acquisition time, so the last one listed"
+        chosen[case_id] = rows[best]
+        skipped = [r["input"] for i, r in enumerate(rows) if i != best]
+        warnings.warn(f"{case_id} has {len(rows)} series; using {rows[best]['input']} ({reason}), "
+                      f"skipping {', '.join(skipped)}", stacklevel=2)
+    return list(chosen.values())
+
+
 def _steps_from(pipeline, from_step) -> set[str]:
     """The step and every step that reads its outputs, directly or not."""
     steps = pipeline.steps()
@@ -566,17 +609,17 @@ def _write_json(path, value):
     os.replace(temporary, path)
 
 
-def _read_cases(path) -> dict[str, dict]:
-    cases = {}
+def _read_cases(path, data_root) -> dict[str, dict]:
+    cases = []
     with open(path, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             row = {k: (v or "").strip() for k, v in row.items()}
-            if row["case_id"] in cases:
-                raise ValueError(f"{path}: case_id {row['case_id']} appears twice")
             if row["laterality"] not in ("left", "right"):
                 raise ValueError(f"{path}: case {row['case_id']} has laterality {row['laterality']!r}")
-            cases[row["case_id"]] = row
-    return cases
+            cases.append(row)
+    if len({row["case_id"] for row in cases}) < len(cases):  # a case_id that appears twice gets one input
+        cases = choose_series(cases, data_root)
+    return {row["case_id"]: row for row in cases}
 
 
 def _write_cases(path, cases):

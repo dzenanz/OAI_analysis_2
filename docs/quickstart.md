@@ -40,7 +40,8 @@ patients, both knees, every visit:
 oai-analysis init M:/OAI_projects/pilot --manifest study_uid_to_vol_path.csv --data-root O:/OAI --patients 9016304,9021791
 ```
 
-`--months 0,96` and `--laterality left` narrow it further. Without `--manifest`, the project starts with an empty
+`--months 0,96` and `--laterality left` narrow it further. A knee scanned more than once at a visit gets one of
+the scans, with a warning (see [projects](projects.md)). Without `--manifest`, the project starts with an empty
 `cases.csv` that you fill in yourself (`case_id, patient_id, month, laterality, input`, with `input` relative to
 `data_root`).
 

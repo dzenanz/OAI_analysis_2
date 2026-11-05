@@ -19,16 +19,47 @@ def read_image(path) -> itk.Image:
 
 def series_description(path, image=None) -> str | None:
     """The DICOM series description of the input, if it has one."""
-    if Path(path).is_dir():  # DICOM series
+    # GetMetaDataDictionary() returns a reference into its owner, so the owner is kept in a variable while it is read
+    if Path(path).is_dir():  # DICOM series: read the header of one file
         names_generator = itk.GDCMSeriesFileNames.New()
         names_generator.SetUseSeriesDetails(True)
         names_generator.SetDirectory(str(path))
-        metadata = itk.imread(names_generator.GetInputFileNames()[0]).GetMetaDataDictionary()
+        owner = itk.GDCMImageIO.New()
+        owner.SetFileName(names_generator.GetInputFileNames()[0])
+        owner.ReadImageInformation()
     else:
-        metadata = (image if image is not None else itk.imread(path)).GetMetaDataDictionary()
+        owner = image if image is not None else itk.imread(path)
+    metadata = owner.GetMetaDataDictionary()
     if metadata.HasKey(SERIES_DESCRIPTION_TAG):
         return metadata[SERIES_DESCRIPTION_TAG]
     return None
+
+
+def size_and_acquisition(path) -> tuple[int, tuple[str, float] | None]:
+    """
+    The number of voxels of an image or a DICOM series, and when it was acquired as (date, time) if the DICOM
+    header says. Reads one header, not the pixels.
+    """
+    path = Path(path)
+    if path.is_dir():  # DICOM series, one slice per file
+        files = sorted(f for f in path.iterdir() if f.is_file())
+        image_io = itk.GDCMImageIO.New()
+        image_io.SetFileName(str(files[0]))
+        image_io.ReadImageInformation()
+        voxels = image_io.GetDimensions(0) * image_io.GetDimensions(1) * len(files)
+        metadata = image_io.GetMetaDataDictionary()
+        for date_tag, time_tag in (("0008|0022", "0008|0032"), ("0008|0021", "0008|0031")):  # acquisition, series
+            if metadata.HasKey(date_tag) and metadata.HasKey(time_tag):
+                date, time = metadata[date_tag].strip(), metadata[time_tag].strip()
+                if date and time:
+                    return voxels, (date, float(time))
+        return voxels, None
+    image_io = itk.ImageIOFactory.CreateImageIO(str(path), itk.CommonEnums.IOFileMode_ReadMode)
+    if image_io is None:
+        raise OSError(f"cannot read {path}")
+    image_io.SetFileName(str(path))
+    image_io.ReadImageInformation()
+    return int(np.prod([image_io.GetDimensions(d) for d in range(image_io.GetNumberOfDimensions())])), None
 
 
 def write(obj, path, compression=False):

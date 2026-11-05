@@ -8,9 +8,9 @@ import itk
 import numpy as np
 import pytest
 
-from oai_analysis import OAPipeline, provenance, qc
+from oai_analysis import OAPipeline, io, provenance, qc
 from oai_analysis.atlas import Atlas
-from oai_analysis.project import Project, read_manifest
+from oai_analysis.project import Project, choose_series, read_manifest
 from oai_analysis.stages import Preprocessor, QCFinding
 from test.test_stages import (
     ConstantThickness,
@@ -213,6 +213,62 @@ def test_read_manifest(tmp_path):
     assert [c["case_id"] for c in cases] == ["9016304_00M_LEFT", "9016304_96M_LEFT"]
     assert cases[1]["input"] == "OAI96MonthImages/results/10.C.1/9016304/20120831/13486606"
     assert len(read_manifest(manifest, months=[0])) == 3
+
+
+def write_series(folder, slices, acquired, description="SAG_3D_DESS_LEFT"):
+    """A DICOM series of 4 x 5 slices, acquired at (date, time)."""
+    folder.mkdir(parents=True)
+    for i in range(slices):
+        image = itk.image_from_array(np.zeros((4, 5), np.int16))
+        metadata = image.GetMetaDataDictionary()
+        metadata["0008|0022"], metadata["0008|0032"] = acquired
+        metadata["0008|103e"] = description
+        itk.imwrite(image, folder / f"{i}.dcm", imageio=itk.GDCMImageIO.New())
+    return folder.name
+
+
+def test_series_description(tmp_path):
+    folder = tmp_path / write_series(tmp_path / "series", 2, ("20121214", "090000"), "SAG_3D_DESS_RIGHT")
+    for _ in range(50):  # it used to read a freed dictionary, which returned None and then crashed
+        churn = [np.ones(10_000 * (i + 1)) for i in range(50)]
+        assert io.series_description(folder).strip() == "SAG_3D_DESS_RIGHT"
+    del churn
+    image = itk.imread(folder / "0.dcm")
+    assert io.series_description(folder / "0.dcm", image).strip() == "SAG_3D_DESS_RIGHT"
+    assert io.series_description(folder / "0.dcm").strip() == "SAG_3D_DESS_RIGHT"
+
+
+def test_choose_series(tmp_path):
+    def case(series):
+        return {"case_id": "1_00M_LEFT", "patient_id": "1", "month": 0, "laterality": "left", "input": series}
+
+    full = write_series(tmp_path / "full", 3, ("20121214", "090000"))
+    stopped = write_series(tmp_path / "stopped", 2, ("20121214", "100000"))
+    early = write_series(tmp_path / "early", 3, ("20121214", "083000.5"))
+    with pytest.warns(UserWarning, match=r"using full \(most voxels: 60\), skipping stopped"):
+        assert choose_series([case(full), case(stopped)], tmp_path) == [case(full)]
+    with pytest.warns(UserWarning, match=r"using full \(acquired last\), skipping early"):
+        assert choose_series([case(full), case(early)], tmp_path) == [case(full)]
+    with pytest.warns(UserWarning, match=r"using early \(could not read missing\)"):  # a row that cannot be read
+        assert choose_series([case(early), case("missing")], tmp_path) == [case(early)]
+    other = {**case(full), "case_id": "1_00M_RIGHT"}
+    assert choose_series([case(full), other], tmp_path) == [case(full), other]  # no duplicate, no warning
+
+
+def test_case_listed_twice(tmp_path):
+    full = write_series(tmp_path / "data" / "full", 3, ("20121214", "090000"))
+    stopped = write_series(tmp_path / "data" / "stopped", 2, ("20121214", "100000"))
+    rows = [{"case_id": "1_00M_LEFT", "laterality": "left", "input": stopped},
+            {"case_id": "1_00M_LEFT", "laterality": "left", "input": full}]
+    with pytest.warns(UserWarning, match="1_00M_LEFT has 2 series; using full"):
+        project = Project.create(tmp_path / "project", rows, data_root=tmp_path / "data")
+    assert project.cases["1_00M_LEFT"]["input"] == "full"
+    assert (tmp_path / "project" / "cases.csv").read_text().count("1_00M_LEFT") == 1
+
+    with open(tmp_path / "project" / "cases.csv", "a", encoding="utf-8") as f:  # listed twice by hand
+        f.write(f"1_00M_LEFT,,,left,{stopped}\n")
+    with pytest.warns(UserWarning, match="1_00M_LEFT has 2 series; using full"):
+        assert Project(tmp_path / "project").cases["1_00M_LEFT"]["input"] == "full"
 
 
 def case_of(image):

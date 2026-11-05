@@ -53,7 +53,8 @@ previous version (`f198a2f`).
   `provenance.json` (parameters, software versions, git commit, GPU, input and output hashes). `run` resumes,
   retries failures, and after a config change redoes only what it affects. Statuses Succeeded, Needs Review, Failed,
   Outdated, Incomplete, Running, Not started; `index.parquet`; plain-English run summaries; cases in batches; a
-  failing case does not stop the others. See [projects](docs/projects.md).
+  failing case does not stop the others. See [projects](docs/projects.md). A knee scanned more than once at a
+  visit gets the series with the most voxels, then the one acquired last, with a warning, instead of an error.
 - **Storage.** A project case takes about 330 MB (340 MB with every intermediate output) instead of 1050 MB:
   compressed NRRD images and HDF5 transforms instead of uncompressed NRRD and 300 MB text transforms.
   `retention: final` keeps about 10 MB per case. The single-image command writes the same files as before.

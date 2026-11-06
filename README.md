@@ -165,7 +165,7 @@ After each step, sanity checks look at its outputs, e.g. whether the segmentatio
 no thickness on much of its surface. A case they flag is marked **Needs Review**, with a plain-English note;
 a case whose outputs are unusable (e.g. no cartilage found) is marked Failed. Every measured value is kept in the
 step's `provenance.json`. The thresholds are parameters of the stages in `project.yaml` (e.g.
-`segmenter: {max_outside_main_pieces: 0.05}`); changing one rechecks the outputs without redoing anything. Each
+`segmenter: {max_outside_main_pieces: 0.1}`); changing one rechecks the outputs without redoing anything. Each
 case also gets small pictures in its `thumbnails/` folder: the segmentation over the image, and the 2D thickness
 maps.
 

@@ -65,7 +65,7 @@ oai-analysis status M:/OAI_projects/pilot
 
 case                 status        prep  seg  reg  mesh  thick  atlas  bio  note
 9016304_00M_LEFT     Succeeded     ✓     ✓    ✓    ✓     ✓      ✓      ✓
-9016304_96M_LEFT     Needs Review  ✓     !    ✓    ✓     ✓      ✓      ✓    37.6% of the femoral cartilage is outside its largest piece (review above 5.0%)
+9016304_96M_LEFT     Needs Review  ✓     !    ✓    ✓     ✓      ✓      ✓    37.6% of the femoral cartilage is outside its largest piece (review above 10.0%)
 ...
 ```
 

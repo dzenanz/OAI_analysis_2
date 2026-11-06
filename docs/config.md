@@ -69,7 +69,7 @@ The 3D U-Net trained on OAI knees, applied in overlapping patches.
 | `overlap_size` | `[16, 16, 8]` | Voxels shared by neighbouring patches |
 | `fc_volume_ml` | `[4.0, 20.0]` | *check*. Usual range of the femoral cartilage volume |
 | `tc_volume_ml` | `[1.5, 8.0]` | *check*. Usual range of the tibial cartilage volume |
-| `max_outside_main_pieces` | `0.05` | *check*. Share of the volume outside the largest piece (FC) or two (TC) |
+| `max_outside_main_pieces` | `0.1` | *check*. Share of the volume outside the largest piece (FC) or two (TC) |
 | `max_uncertainty` | `0.3` | *check*. Mean of 1 - &#124;2p - 1&#124; over the cartilage |
 
 #### `precomputed`
@@ -88,7 +88,7 @@ The files are not part of the fingerprint: after they change, redo the step with
 | `path` | `'{case_id}/{structure}_prob.nrrd'` | Template of each map's file, see above |
 | `fc_volume_ml` | `[4.0, 20.0]` | *check*. Usual range of the femoral cartilage volume |
 | `tc_volume_ml` | `[1.5, 8.0]` | *check*. Usual range of the tibial cartilage volume |
-| `max_outside_main_pieces` | `0.05` | *check*. Share of the volume outside the largest piece (FC) or two (TC) |
+| `max_outside_main_pieces` | `0.1` | *check*. Share of the volume outside the largest piece (FC) or two (TC) |
 | `max_uncertainty` | `0.3` | *check*. Mean of 1 - &#124;2p - 1&#124; over the cartilage |
 
 ### `registerer`: register the image to the atlas

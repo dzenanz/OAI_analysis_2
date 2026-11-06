@@ -154,7 +154,7 @@ finish and marks it Needs Review. An *info* finding only records a measured valu
 | | median intensity after windowing | info |
 | Segment | each structure is found | fail otherwise |
 | | volume | review outside 4–20 ml (FC), 1.5–8 ml (TC) |
-| | share of the volume outside the largest piece (FC) or two pieces (TC) | review above 5% |
+| | share of the volume outside the largest piece (FC) or two pieces (TC) | review above 10% |
 | | the network's mean uncertainty over the cartilage | review above 0.3 |
 | Register | share of the transform that folds space | review above 1% |
 | | correlation of the warped image with the atlas | review below 0.75 |

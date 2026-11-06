@@ -31,6 +31,9 @@ These are read by a project (`oai-analysis init` writes them to `project.yaml`),
 | `retention` | `checkpoints` | What is kept on disk. `checkpoints`: each step's outputs, enough to resume from any step. `all`: also the stages' intermediate outputs (e.g. `FC_inner.vtk`). `final`: once a case finishes, only the atlas-mapped meshes, the biomarkers and the provenance. |
 | `storage.image_format` | `nrrd` | `nrrd` or `nii.gz`. Both are compressed and about the same size; NIfTI stores the image position in single precision, so resuming from it can change results slightly. |
 | `storage.transform_format` | `h5` | `h5` (compressed, about 70 MB) or `tfm` (text, about 300 MB, readable). |
+| `longitudinal.min_other_visits` | `2` | How many other finished visits of the same knee a case needs to be compared with them (see [projects](projects.md#comparing-the-visits-of-a-knee)). |
+| `longitudinal.departure` | volume `0.25`, pieces `0.05`, uncertainty `0.08`, similarity `0.08`, no thickness `0.1` | How far a value may be from the median of the knee's other visits before the case needs review, by check code (`segment.volume` as a share of the median, either way). `null` switches one off. |
+| `longitudinal.knee_typical` | `segment.volume`, `segment.pieces`, `atlas_map.no_thickness` | The checks whose review flag is dropped when most of the knee's other visits have it too. |
 
 ## Stages
 

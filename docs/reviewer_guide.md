@@ -30,7 +30,9 @@ flagged something, `✗` is where it failed.
 ## What *Needs Review* means
 
 The automatic checks look for signs that a result may be wrong. They do not decide that it *is* wrong: a flagged
-case can be fine, and that is what a reviewer decides. The note says what was found, for example:
+case can be fine, and that is what a reviewer decides. Each visit is also compared with the same knee's other
+visits: a finding the knee has at most visits (e.g. lost cartilage) does not flag it, and a visit unlike the others
+does. The note says what was found, for example:
 
 | Note | Usually means |
 |---|---|
@@ -40,6 +42,7 @@ case can be fine, and that is what a reviewer decides. The note says what was fo
 | *after registration, the image correlates with the atlas at 0.720* | The knee was not lined up well with the reference knee, so the map may put thickness in the wrong place. |
 | *the femoral cartilage volume is 2.1 ml (usual: 4.0-20.0 ml)* | Much less (or more) cartilage was found than in a typical knee. |
 | *the tibial cartilage is thicker than 6.0 mm on 12.0% of its surface* | Implausibly thick cartilage, usually from a segmentation error. |
+| *...; this knee's other visits have 12.7 ml (median), so this visit either has a processing problem or shows a real change* | This visit is unlike the same knee's other visits. Compare it with them: a sudden jump that later visits do not share is usually a processing problem. |
 
 When there are several findings, the table shows the first one and "(and N more)"; the spreadsheet has all of them.
 

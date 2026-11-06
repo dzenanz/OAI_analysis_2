@@ -166,6 +166,25 @@ The thresholds were tuned on the regression benchmark cases and the cases a Dec 
 problems: those problem cases are all flagged, and the clean ones are not. They are stage parameters, so each
 project can change them in `project.yaml`.
 
+### Comparing the visits of a knee
+
+A fixed threshold cannot tell a processing problem from the knee itself: a knee that has lost cartilage has little
+of it at every visit. So a project also compares each finished case with the other finished visits of the same knee
+(the same `patient_id` and `laterality` in `cases.csv`), when there are at least two:
+
+- **A flag the knee usually has is dropped**, for the volume, the pieces and the atlas surface without thickness.
+  E.g. a tibia with no thickness on 30% of the atlas surface at most visits has lost cartilage; the case is not
+  marked Needs Review for it, and the note goes to the `knee_typical` column of `index.parquet` instead. A poor
+  registration or an uncertain segmentation stays flagged, even at every visit.
+- **A visit that departs from the knee's other visits is flagged**, even within the fixed thresholds, e.g. a
+  femoral cartilage volume of 6.5 ml in a knee with 12.7 ml at its other visits. Either the processing went wrong
+  or the knee changed; the note says which value and by how much.
+
+On 148 knee visits (11 patients), this took 6 cases off Needs Review, all of them cartilage loss seen at every
+visit, and flagged 3 more. Two of those 3 disagree most with an earlier run of the 2019 pipeline, and no fixed
+threshold caught them. Finishing a visit can change how the knee's other visits compare, so their status can
+change too. The limits are the `longitudinal` setting (see the [config reference](config.md)).
+
 ## Reproducibility
 
 Everything before registration (preprocessing, segmentation) gives exactly the same results every time on the same

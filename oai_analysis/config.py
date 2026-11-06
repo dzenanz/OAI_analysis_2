@@ -24,7 +24,7 @@ from oai_analysis import registry
 
 SINGLE_STAGES = ("preprocessor", "segmenter", "registerer", "mesh_generator", "thickness_estimator", "atlas_mapper")
 BIOMARKER_EXTRACTORS = "biomarker_extractors"
-PROJECT_KEYS = ("data_root", "batch_size", "retention", "storage")  # used by a project (see project.py), not by the pipeline
+PROJECT_KEYS = ("data_root", "batch_size", "retention", "storage", "longitudinal")  # used by a project (see project.py), not by the pipeline
 TOP_LEVEL_KEYS = ("pipeline", "device", "seed", "deterministic", *PROJECT_KEYS)
 
 

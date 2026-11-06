@@ -27,7 +27,9 @@ previous version (`f198a2f`).
   the cases a Dec 2024 manual review found problems in, and none of the clean ones. See the
   [reviewer guide](docs/reviewer_guide.md). A run of 148 knees (11 patients, all visits) set the review
   threshold for cartilage outside its main pieces to 10%: at 5%, some knees were flagged at every visit for
-  their normal anatomy.
+  their normal anatomy. A project also compares each visit with the same knee's other visits: a finding the knee
+  has at most visits, such as lost cartilage, no longer flags it, and a visit unlike the others is flagged. See
+  [comparing the visits of a knee](docs/projects.md#comparing-the-visits-of-a-knee).
 - **Each case has pictures to look at**: the cartilage found on an MRI slice, and the thickness maps on a fixed
   0–5 mm colour scale.
 - **Results come much faster**: about 1 minute per case instead of 4.5 on the same GPU (RTX 5060 Ti), mainly because

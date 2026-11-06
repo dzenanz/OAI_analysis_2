@@ -39,14 +39,14 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
-from oai_analysis import config, io, provenance
+from oai_analysis import config, io, longitudinal, provenance
 
 CASE_COLUMNS = ("case_id", "patient_id", "month", "laterality", "input")
 RETENTION = ("checkpoints", "all", "final")
 IMAGE_FORMATS = ("nrrd", "nii.gz")
 TRANSFORM_FORMATS = ("h5", "tfm")
 DEFAULT_SETTINGS = {"data_root": None, "retention": "checkpoints", "batch_size": 8,
-                    "storage": {"image_format": "nrrd", "transform_format": "h5"}}
+                    "storage": {"image_format": "nrrd", "transform_format": "h5"}, "longitudinal": None}
 KEPT_BY_FINAL = ("atlas_map", "biomarkers/")  # steps whose files retention: final keeps
 
 # case statuses, in plain language
@@ -76,6 +76,8 @@ class CaseStatus:
     last_run_s: float = 0.0  # of the steps that are done, run by the latest run that worked on the case
     finished: str | None = None  # when the last step finished
     review: dict[str, list[str]] = dataclasses.field(default_factory=dict)  # step -> messages of its review flags
+    knee_typical: list[str] = dataclasses.field(default_factory=list)  # flags dropped as usual for the knee
+    qc: dict[str, list[dict]] = dataclasses.field(default_factory=dict, repr=False)  # step -> findings, when finished
 
 
 class Project:
@@ -94,6 +96,7 @@ class Project:
         self.storage = storage
         if not isinstance(self.settings["batch_size"], int) or self.settings["batch_size"] < 1:
             raise ValueError(f"batch_size must be a positive whole number, not {self.settings['batch_size']!r}")
+        self.longitudinal = longitudinal.settings(self.settings["longitudinal"])
         self.cases = _read_cases(self.path / "cases.csv", self.settings["data_root"] or self.path)
 
     # creating a project
@@ -117,6 +120,7 @@ class Project:
             "batch_size": cfg.get("batch_size", DEFAULT_SETTINGS["batch_size"]),
             "retention": cfg.get("retention", retention),
             "storage": {**DEFAULT_SETTINGS["storage"], **(cfg.get("storage") or {})},
+            "longitudinal": longitudinal.settings(cfg.get("longitudinal")),
         }
         path.mkdir(parents=True, exist_ok=True)
         (path / "project.yaml").write_text(config.dump(settings), encoding="utf-8")
@@ -162,7 +166,29 @@ class Project:
 
     def status(self, pipeline=None, case_ids=None) -> list[CaseStatus]:
         pipeline = pipeline or self.pipeline()
-        return [self.case_status(pipeline, case_id) for case_id in (case_ids or self.cases)]
+        wanted = list(case_ids or self.cases)
+        knees = {self._knee(case_id) for case_id in wanted} - {None}
+        # the other visits of the same knees too, to compare with
+        statuses = {case_id: self.case_status(pipeline, case_id) for case_id in self.cases
+                    if case_id in wanted or self._knee(case_id) in knees}
+        self._compare_visits(statuses.values())
+        return [statuses[case_id] for case_id in wanted]
+
+    def _knee(self, case_id) -> tuple[str, str] | None:
+        row = self.cases[case_id]
+        return (row["patient_id"], row["laterality"]) if row.get("patient_id") else None
+
+    def _compare_visits(self, statuses):
+        """Review each finished case again, against the other finished visits of its knee (see longitudinal.py)."""
+        knees = {}
+        for s in statuses:
+            if s.status in FINISHED and self._knee(s.case_id) is not None:
+                knees.setdefault(self._knee(s.case_id), []).append(s)
+        for visits in knees.values():
+            for s in visits:
+                review, s.knee_typical = longitudinal.review(s.qc, [o.qc for o in visits if o is not s],
+                                                             self.longitudinal)
+                _set_review(s, review)
 
     def case_status(self, pipeline, case_id) -> CaseStatus:
         folder = self.case_folder(case_id)
@@ -211,15 +237,9 @@ class Project:
         elif outdated:
             result.status, result.note = OUTDATED, notes[outdated[0]]
         elif all(state == DONE for state in states.values()):
-            review = {name: [f["message"] for f in records[name].get("qc", []) if f["severity"] == "review"]
-                      for name in states}
-            result.review = {name: messages for name, messages in review.items() if messages}
-            messages = [message for messages in result.review.values() for message in messages]
-            if messages:
-                result.status = NEEDS_REVIEW
-                result.note = messages[0] + (f" (and {len(messages) - 1} more)" if len(messages) > 1 else "")
-            else:
-                result.status = SUCCEEDED
+            result.qc = {name: records[name].get("qc", []) for name in states}
+            _set_review(result, {name: [f["message"] for f in findings if f["severity"] == "review"]
+                                 for name, findings in result.qc.items()})
         elif any(state == DONE for state in states.values()):
             missing = next(name for name, state in states.items() if state == MISSING)
             result.status, result.note = INCOMPLETE, f'Stopped before "{described[missing]}"; run again to finish'
@@ -251,6 +271,7 @@ class Project:
                          "laterality": row["laterality"], "status": s.status, "failed_step": s.failed_step,
                          "note": s.note, **{f"step_{name}": state for name, state in s.steps.items()},
                          "review": [message for messages in s.review.values() for message in messages],
+                         "knee_typical": s.knee_typical,
                          "duration_s": s.duration_s, "finished": s.finished})
         temporary = self.path / "index.parquet.tmp"
         pq.write_table(pa.Table.from_pylist(rows), temporary)
@@ -294,6 +315,7 @@ class Project:
 
         def case_finished(case_id):
             statuses[case_id] = status = self.case_status(pipeline, case_id)
+            self._compare_visits(statuses.values())  # this visit can change how the knee's others compare
             log.summary(_summary_line(status))
             self.write_index(statuses.values())
 
@@ -531,6 +553,17 @@ def _what_changed_in_checks(step, record) -> str:
     changed = [f"{step.stage.kind}.{k} changed {old.get(k)} -> {v}" for k, v in _check_params(step.stage).items()
                if old.get(k) != v]
     return "; ".join(changed or ["its checks changed"]) + "; run again to recheck"
+
+
+def _set_review(status, review):
+    """Set a finished case's status from its review messages by step."""
+    status.review = {name: messages for name, messages in review.items() if messages}
+    messages = [message for messages in status.review.values() for message in messages]
+    if messages:
+        status.status = NEEDS_REVIEW
+        status.note = messages[0] + (f" (and {len(messages) - 1} more)" if len(messages) > 1 else "")
+    else:
+        status.status, status.note = SUCCEEDED, ""
 
 
 def _summary_line(status) -> str:

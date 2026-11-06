@@ -6,6 +6,7 @@ from typing import ClassVar
 
 import itk
 import numpy as np
+import pyarrow.parquet as pq
 import pytest
 
 from oai_analysis import OAPipeline, io, provenance, qc
@@ -412,6 +413,38 @@ def test_review_flags(project):
     assert [s.status for s in result] == ["Succeeded", "Succeeded"]
     after = provenance_of(project, "1_00M_LEFT", "05_thickness")
     assert after["started"] == record["started"] and after["qc"][0]["severity"] == "info"
+
+
+def test_visits_of_a_knee_are_compared(tmp_path):
+    itk.imwrite(ball_image(), str(tmp_path / "a.nrrd"))
+    cases = [{"case_id": f"1_{m:02d}M_LEFT", "patient_id": "1", "month": m, "laterality": "left", "input": "a.nrrd"}
+             for m in (0, 12, 24, 36)] + [{"case_id": "2_00M_LEFT", "laterality": "left", "input": "a.nrrd"}]
+    project = Project.create(tmp_path / "project", cases, data_root=tmp_path)
+    pipeline = make_pipeline()
+    project.run(pipeline=pipeline, echo=lambda text: None)
+
+    def set_no_thickness(case_id, fc, tc):  # as if the atlas map check had found these
+        path = project.case_folder(case_id) / "06_atlas_map" / "provenance.json"
+        record = json.loads(path.read_text())
+        record["qc"] = [{"severity": "review" if v > 0.15 else "info", "code": "atlas_map.no_thickness",
+                         "message": f"{s} {v}", "value": v} for s, v in (("FC", fc), ("TC", tc))]
+        path.write_text(json.dumps(record))
+
+    for case_id, fc, tc in (("1_00M_LEFT", 0.20, 0.02), ("1_12M_LEFT", 0.22, 0.03), ("1_24M_LEFT", 0.21, 0.02),
+                            ("1_36M_LEFT", 0.21, 0.13), ("2_00M_LEFT", 0.20, 0.02)):
+        set_no_thickness(case_id, fc, tc)
+    result = {s.case_id: s for s in project.status(pipeline)}
+    assert result["1_00M_LEFT"].status == "Succeeded"  # FC flagged at every visit: usual for this knee
+    assert result["1_00M_LEFT"].knee_typical[0].startswith("FC 0.2; most of this knee's other visits are the same")
+    assert result["1_36M_LEFT"].status == "Needs Review"  # TC far from the knee's other visits
+    assert result["1_36M_LEFT"].review == {"atlas_map": ["TC 0.13; this knee's other visits have 2.0% (median), so "
+                                                         "this visit either has a processing problem or shows a "
+                                                         "real change"]}
+    assert result["2_00M_LEFT"].status == "Needs Review"  # no patient_id, so nothing to compare with
+    assert project.status(pipeline, case_ids=["1_00M_LEFT"])[0].status == "Succeeded"  # compared with the others
+    project.write_index(result.values())
+    index = {row["case_id"]: row for row in pq.read_table(project.path / "index.parquet").to_pylist()}
+    assert len(index["1_12M_LEFT"]["knee_typical"]) == 1 and len(index["1_36M_LEFT"]["review"]) == 1
 
 
 def test_fail_finding_fails_the_case(project):

@@ -105,4 +105,5 @@ it.
 | keep less on disk | `retention: final` in `project.yaml` |
 
 Orchestrators (knee-sarg's Dagster, SLURM scripts) should call `oai-analysis run` or `Project.run()` on a list of
-cases, rather than one process per image, so the networks are loaded once per batch.
+cases, rather than one process per image, so the networks are loaded once per GPU and the cases run in parallel.
+On SLURM, one job with several GPUs and CPUs is enough; see [parallel runs](projects.md#parallel-runs).

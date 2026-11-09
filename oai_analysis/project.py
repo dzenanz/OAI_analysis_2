@@ -2,7 +2,7 @@
 A project: a folder with the cases to process, the pipeline config, and every case's outputs and provenance.
 
     PROJECT/
-      project.yaml     pipeline config, data root, batch size, retention and storage formats
+      project.yaml     pipeline config, data root, workers, retention and storage formats
       cases.csv        one row per case: case_id, patient_id, month, laterality, input
       runs.jsonl       one line per `oai-analysis run`
       index.parquet    one row per case: status, the step that failed, a note, the review flags
@@ -16,9 +16,8 @@ A project: a folder with the cases to process, the pipeline config, and every ca
 
 A step is done when its provenance.json says so and its fingerprint (see provenance.py) still matches the config
 and the outputs of the steps it reads. `run` redoes everything else, so it resumes an interrupted run and redoes
-only the steps a config change affects. Cases run in batches (batch_size in project.yaml): the cases of a batch
-are preprocessed, then segmented one after another, then registered one after another, so each network is
-loaded once per batch; then each case finishes on its own. A step that raises fails its case, not the batch.
+only the steps a config change affects. Cases run in parallel (see parallel.py): CPU worker processes preprocess
+and finish them, and one process per GPU segments and registers them. A step that raises fails its case only.
 
 After a step works, its stage's check() looks at the outputs (see Stage.check). A "fail" finding fails the case,
 and a "review" one marks it Needs Review. The findings are kept in provenance.json. Changing a check's
@@ -45,7 +44,7 @@ CASE_COLUMNS = ("case_id", "patient_id", "month", "laterality", "input")
 RETENTION = ("checkpoints", "all", "final")
 IMAGE_FORMATS = ("nrrd", "nii.gz")
 TRANSFORM_FORMATS = ("h5", "tfm")
-DEFAULT_SETTINGS = {"data_root": None, "retention": "checkpoints", "batch_size": 8,
+DEFAULT_SETTINGS = {"data_root": None, "retention": "checkpoints", "workers": "auto",
                     "storage": {"image_format": "nrrd", "transform_format": "h5"}, "longitudinal": None}
 KEPT_BY_FINAL = ("atlas_map", "biomarkers/")  # steps whose files retention: final keeps
 
@@ -94,8 +93,9 @@ class Project:
             raise ValueError(f"storage formats must be image_format: {IMAGE_FORMATS}, "
                              f"transform_format: {TRANSFORM_FORMATS}, not {storage}")
         self.storage = storage
-        if not isinstance(self.settings["batch_size"], int) or self.settings["batch_size"] < 1:
-            raise ValueError(f"batch_size must be a positive whole number, not {self.settings['batch_size']!r}")
+        if self.settings["workers"] != "auto" and (not isinstance(self.settings["workers"], int)
+                                                   or self.settings["workers"] < 0):
+            raise ValueError(f"workers must be auto or a whole number, not {self.settings['workers']!r}")
         self.longitudinal = longitudinal.settings(self.settings["longitudinal"])
         self.cases = _read_cases(self.path / "cases.csv", self.settings["data_root"] or self.path)
 
@@ -117,7 +117,7 @@ class Project:
         settings = {
             **OAPipeline.from_config(cfg).config(),  # the full config, so every default is written down
             "data_root": str(data_root) if data_root is not None else cfg.get("data_root"),
-            "batch_size": cfg.get("batch_size", DEFAULT_SETTINGS["batch_size"]),
+            "workers": cfg.get("workers", DEFAULT_SETTINGS["workers"]),
             "retention": cfg.get("retention", retention),
             "storage": {**DEFAULT_SETTINGS["storage"], **(cfg.get("storage") or {})},
             "longitudinal": longitudinal.settings(cfg.get("longitudinal")),
@@ -227,7 +227,7 @@ class Project:
         if _is_running(folder):
             marker = _read_json(folder / "running.json")
             step = marker.get("step")
-            result.status, result.note = RUNNING, f"Running {step}" if step else "Waiting for its turn in the batch"
+            result.status, result.note = RUNNING, f"Running {step}" if step else "Waiting for its turn"
             return result
         failed = [name for name, state in states.items() if state == STEP_FAILED]
         outdated = [name for name, state in states.items() if state == STEP_OUTDATED]
@@ -279,15 +279,16 @@ class Project:
 
     # running
 
-    def run(self, case_ids=None, from_step=None, pipeline=None, batch_size=None, echo=None) -> list[CaseStatus]:
+    def run(self, case_ids=None, from_step=None, pipeline=None, workers=None, echo=None) -> list[CaseStatus]:
         """
         Process the cases (default: all) that are not up to date, skipping the steps that are.
-        from_step reruns that step and every step that depends on it. batch_size (default: from project.yaml) is
-        how many cases go through segmentation, then registration, before each finishes on its own.
+        from_step reruns that step and every step that depends on it. workers (default: from project.yaml) is the
+        number of CPU worker processes, "auto" for as many as the CPUs allow, or 0 to run everything in this
+        process, one case after another.
         """
         echo = echo or (lambda text, console=sys.stdout: print(text, file=console, flush=True))
         pipeline = pipeline or self.pipeline()
-        batch_size = batch_size or self.settings["batch_size"]
+        workers = self.settings["workers"] if workers is None else workers
         case_ids = list(case_ids or self.cases)
         unknown = [c for c in case_ids if c not in self.cases]
         if unknown:
@@ -306,12 +307,11 @@ class Project:
                     f"oai-analysis {provenance.software()['oai-analysis']}, config project.yaml")
         log.summary(f"{_cases(len(case_ids))} selected ({len(todo)} to do, "
                     f"{len(case_ids) - len(todo) - len(running)} already done"
-                    + (f", {len(running)} running in another process" if running else "")
-                    + f"), in batches of {batch_size}.")
+                    + (f", {len(running)} running in another process" if running else "") + ").")
         with open(self.path / "runs.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps({"run_id": run_id, "started": provenance.now(), "command": " ".join(sys.argv),
                                 "cases": len(case_ids), "to_do": len(todo), "from_step": from_step,
-                                "batch_size": batch_size, "software": provenance.software()}) + "\n")
+                                "workers": workers, "software": provenance.software()}) + "\n")
 
         def case_finished(case_id):
             statuses[case_id] = status = self.case_status(pipeline, case_id)
@@ -322,7 +322,7 @@ class Project:
         try:
             # what the stages print, warnings included, goes to the full log
             with contextlib.redirect_stdout(_LogWriter(log)), contextlib.redirect_stderr(_LogWriter(log)):
-                self.work(pipeline, todo, from_step, run_id, batch_size, log.progress, case_finished)
+                self.work(pipeline, todo, from_step, run_id, workers, log, case_finished)
         except KeyboardInterrupt:
             log.summary("Run stopped by the user. Run again to continue where it stopped.")
             raise
@@ -337,41 +337,27 @@ class Project:
             log.close()
         return [statuses[c] for c in case_ids]
 
-    def work(self, pipeline, case_ids, from_step, run_id, batch_size, progress, case_finished):
-        """
-        Run the cases in batches of batch_size, in this process. The cases of a batch go through the steps up to
-        the last of the BATCHED_STEPS step by step, one case after another, so a network stays in use for the
-        whole batch; then each case finishes on its own. A failing step fails its case, not the batch.
-        """
-        from oai_analysis.pipeline import BATCHED_STEPS, release_gpu_memory
+    def work(self, pipeline, case_ids, from_step, run_id, workers, log, case_finished):
+        """Run the cases in worker processes (see parallel.py), or with workers=0 in this process, one by one."""
+        from oai_analysis import parallel
 
         pipeline.device = check_device(pipeline.device)
-        pipeline.setup()
         rerun = _steps_from(pipeline, from_step) if from_step is not None else set()
-        steps = pipeline.steps()
-        together = 1 + max(i for i, step in enumerate(steps) if step.name in BATCHED_STEPS)
-        heartbeat = _Heartbeat(progress, run_id)
+        heartbeat = _Heartbeat(log.progress, run_id)
         heartbeat.start()
         try:
-            for start in range(0, len(case_ids), batch_size):
-                batch_ids = case_ids[start:start + batch_size]
-                if len(case_ids) > batch_size:
-                    progress(f"Batch {start // batch_size + 1} of {-(-len(case_ids) // batch_size)}: "
-                             f"{', '.join(batch_ids)}")
-                batch = [_CaseRunner(self, pipeline, case_id, run_id, rerun, progress, heartbeat)
-                         for case_id in batch_ids]
-                for step in steps[:together]:
-                    for case in batch:
-                        if case.needs(step):
-                            case.run_step(step)
-                    if step.name in BATCHED_STEPS:
-                        release_gpu_memory()
-                for case in batch:
-                    for step in steps[together:]:
-                        if case.needs(step):
-                            case.run_step(step)
-                    case.finish()
-                    case_finished(case.case_id)
+            if workers:
+                parallel.run(self, pipeline, case_ids, rerun, run_id, workers, log.progress, log.write, heartbeat,
+                             case_finished)
+                return
+            pipeline.setup()
+            for case_id in case_ids:
+                case = _CaseRunner(self, pipeline, case_id, run_id, rerun, log.progress, heartbeat)
+                for step in pipeline.steps():
+                    if case.needs(step):
+                        case.run_step(step)
+                case.finish()
+                case_finished(case_id)
         finally:
             heartbeat.stop()
 
@@ -671,10 +657,12 @@ class _RunLog:
         self.echo = echo
         self.log = open(folder / f"{run_id}.log", "a", encoding="utf-8")
         self.summary_file = open(folder / f"{run_id}.summary.txt", "a", encoding="utf-8")
+        self._lock = threading.Lock()  # in a parallel run, the workers' messages arrive in another thread
 
     def write(self, text):
-        self.log.write(text)
-        self.log.flush()
+        with self._lock:
+            self.log.write(text)
+            self.log.flush()
 
     def progress(self, text):
         self.write(f"[{datetime.datetime.now():%H:%M:%S}] {text}\n")
@@ -694,11 +682,12 @@ class _RunLog:
 class _CaseRunner:
     """Runs the steps of one case, keeping their outputs in memory for the steps that follow."""
 
-    def __init__(self, project, pipeline, case_id, run_id, rerun, progress, heartbeat):
+    def __init__(self, project, pipeline, case_id, run_id, rerun, progress, heartbeat, checks=True):
         from oai_analysis.stages import CaseArtifacts
 
         self.project, self.pipeline, self.case_id, self.run_id = project, pipeline, case_id, run_id
         self.rerun, self.progress, self.heartbeat = rerun, progress, heartbeat
+        self.checks = checks  # False leaves the checks and thumbnails to whoever loads the outputs next
         self.folder = project.case_folder(case_id)
         self.folder.mkdir(parents=True, exist_ok=True)
         case = project.case_info(case_id)
@@ -734,7 +723,7 @@ class _CaseRunner:
         """Check the outputs of a finished step again, e.g. with new thresholds."""
         if not all(self._load(name) for name in (*step.inputs, step.name)):
             return
-        self.progress(f"{self.case_id}: checking {step.description} again")
+        self.progress(f"{self.case_id}: checking {step.description}")
         try:
             self._check(step, record)
         except Exception as e:
@@ -794,6 +783,8 @@ class _CaseRunner:
         Run the step; save its outputs, or the exception that failed it, and its provenance. Returns whether it
         worked.
         """
+        from oai_analysis.pipeline import GPU_STEPS, release_gpu_memory
+
         if not all(self._load(name) for name in step.inputs):
             return False
         record = self.project._new_record(step, self.pipeline, self._input_hashes(step), self.records, self.run_id)
@@ -801,24 +792,27 @@ class _CaseRunner:
         shutil.rmtree(step_folder, ignore_errors=True)
         step_folder.mkdir(parents=True)
         self.progress(f"{self.case_id}: {step.description}")
-        self.heartbeat.set_step(self.case_id, step)
+        self.heartbeat.set_step(self.case_id, step.description)
         start = time.perf_counter()
         try:
             outcome = self.pipeline.run_step(step, self.result)
         except Exception as e:
             outcome = e
+        if step.name in GPU_STEPS:
+            release_gpu_memory()  # room for the other network
         if not isinstance(outcome, Exception):
             try:
                 record["outputs"] = self.project._save(step, outcome.outputs, step_folder)
                 if self.project.settings["retention"] == "all":
                     record["intermediates"] = self.project._save(step, outcome.intermediates, step_folder)
                 record["status"] = "complete"
-                self._check(step, record)
+                if self.checks:
+                    self._check(step, record)
             except Exception as e:
                 outcome = e
         if isinstance(outcome, Exception):
             self._record_error(record, outcome)
-        else:
+        elif self.checks:
             self._thumbnails(step)
         record["finished"] = provenance.now()
         record["duration_s"] = round(time.perf_counter() - start, 1)
@@ -860,46 +854,43 @@ class _Heartbeat(threading.Thread):
     def __init__(self, progress, run_id):
         super().__init__(daemon=True)
         self.progress, self.run_id = progress, run_id
-        self.markers = {}  # case_id -> its running.json
-        self.steps = {}  # case_id -> the step it is on; None while it waits for other cases of its batch
-        self.step, self.step_case = None, None
-        self.step_started = self.last_progress = time.time()
+        # case_id -> [its running.json, the step it is on (None while it waits), when that started, when last said]
+        self.cases = {}
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
 
     def add(self, case_id, marker):
         with self._lock:
-            self.markers[case_id], self.steps[case_id] = marker, None
-            self._beat([case_id])
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            self.cases[case_id] = [marker, None, 0.0, 0.0]
+            self._beat(case_id)
 
     def remove(self, case_id):
         with self._lock:
-            self.markers.pop(case_id).unlink(missing_ok=True)
-            del self.steps[case_id]
-            if not self.markers:
-                self.step, self.step_case = None, None
+            if case_id in self.cases:
+                self.cases.pop(case_id)[0].unlink(missing_ok=True)
 
     def set_step(self, case_id, step):
+        """step: the description of the step the case is on, or None while it waits."""
         with self._lock:
-            self.steps = {c: step.description if c == case_id else None for c in self.steps}
-            self.step, self.step_case = step.description, case_id
-            self.step_started = self.last_progress = time.time()
-            self._beat(list(self.markers))
+            if case_id in self.cases:
+                self.cases[case_id][1:] = [step, time.time(), time.time()]
+                self._beat(case_id)
 
-    def _beat(self, case_ids):
-        for case_id in case_ids:
-            _write_json(self.markers[case_id], {"pid": os.getpid(), "host": _host(), "run_id": self.run_id,
-                                                "case_id": case_id, "step": self.steps[case_id],
-                                                "heartbeat": time.time()})
+    def _beat(self, case_id):
+        marker, step = self.cases[case_id][:2]
+        _write_json(marker, {"pid": os.getpid(), "host": _host(), "run_id": self.run_id, "case_id": case_id,
+                             "step": step, "heartbeat": time.time()})
 
     def run(self):
         while not self._stop_event.wait(HEARTBEAT_SECONDS):
             with self._lock:
-                self._beat(list(self.markers))
-                if self.step is not None and time.time() - self.last_progress >= PROGRESS_EVERY_SECONDS:
-                    minutes = (time.time() - self.step_started) / 60
-                    self.progress(f"{self.step_case}: still working on {self.step} ({minutes:.0f} min)")
-                    self.last_progress = time.time()
+                for case_id, entry in self.cases.items():
+                    self._beat(case_id)
+                    _, step, started, said = entry
+                    if step is not None and time.time() - said >= PROGRESS_EVERY_SECONDS:
+                        self.progress(f"{case_id}: still working on {step} ({(time.time() - started) / 60:.0f} min)")
+                        entry[3] = time.time()
 
     def stop(self):
         self._stop_event.set()

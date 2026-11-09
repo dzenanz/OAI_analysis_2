@@ -19,7 +19,7 @@ device: cuda
 |---|---|---|
 | `pipeline` | | The stages, below. |
 | `device` | `auto` | `cuda`, `cuda:1`, `cpu` or `auto`. `auto` uses the GPU, and a project stops if there is none rather than run on the CPU (much slower) without being asked. |
-| `seed` | `0` | Python's, numpy's and torch's random number generators start from it at each step, so a case draws the same random numbers however it is run, resumed or batched. Recorded in provenance. |
+| `seed` | `0` | Python's, numpy's and torch's random number generators start from it at each step, so a case draws the same random numbers however it is run, resumed or run alongside others. Recorded in provenance. |
 | `deterministic` | `false` | Use torch's deterministic algorithms where it has them. Slower, and the registration on a GPU still varies a little between runs (see [projects](projects.md#reproducibility)). Recorded in provenance. |
 
 These are read by a project (`oai-analysis init` writes them to `project.yaml`), not by the single-image command:
@@ -27,7 +27,7 @@ These are read by a project (`oai-analysis init` writes them to `project.yaml`),
 | Setting | Default | Meaning |
 |---|---|---|
 | `data_root` | none | The folder that the `input` paths in `cases.csv` are relative to, e.g. `O:/OAI`. |
-| `batch_size` | `8` | Cases that go through preprocessing, segmentation and registration together, so each network is loaded and used for all of them in turn. A batch holds about 0.5 GB per case in memory. `run --batch-size N` overrides it. |
+| `workers` | `auto` | CPU worker processes, which preprocess the cases and do the steps after registration, while one process per GPU segments and registers them (see [projects](projects.md#parallel-runs)). `auto`: one per two CPUs, less one per GPU, at most one per case. `0` runs everything in the `run` process, one case after another. `run --workers N` overrides it. |
 | `retention` | `checkpoints` | What is kept on disk. `checkpoints`: each step's outputs, enough to resume from any step. `all`: also the stages' intermediate outputs (e.g. `FC_inner.vtk`). `final`: once a case finishes, only the atlas-mapped meshes, the biomarkers and the provenance. |
 | `storage.image_format` | `nrrd` | `nrrd` or `nii.gz`. Both are compressed and about the same size; NIfTI stores the image position in single precision, so resuming from it can change results slightly. |
 | `storage.transform_format` | `h5` | `h5` (compressed, about 70 MB) or `tfm` (text, about 300 MB, readable). |
@@ -37,9 +37,8 @@ These are read by a project (`oai-analysis init` writes them to `project.yaml`),
 
 ## Stages
 
-Every stage has a `name` and its parameters. Some parameters are marked:
-- *check*: a threshold of the stage's sanity checks. Changing it rechecks the saved outputs without redoing the step.
-- *speed*: changes how fast the stage runs, not what it computes. Changing it does not make outputs outdated.
+Every stage has a `name` and its parameters. Parameters marked *check* are thresholds of the stage's sanity
+checks: changing one rechecks the saved outputs without redoing the step.
 
 Changing any other parameter makes the step, and every step after it, outdated, so `run` redoes them.
 
@@ -68,7 +67,6 @@ The 3D U-Net trained on OAI knees, applied in overlapping patches.
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `batch_size` | `4` | *speed*. Patches per pass through the network |
 | `overlap_size` | `[16, 16, 8]` | Voxels shared by neighbouring patches |
 | `fc_volume_ml` | `[4.0, 20.0]` | *check*. Usual range of the femoral cartilage volume |
 | `tc_volume_ml` | `[1.5, 8.0]` | *check*. Usual range of the tibial cartilage volume |

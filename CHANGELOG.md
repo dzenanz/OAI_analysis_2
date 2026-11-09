@@ -56,9 +56,15 @@ previous version (`f198a2f`).
 - **Projects** (`oai-analysis init | run | status`): a folder per project with every step's outputs and a
   `provenance.json` (parameters, software versions, git commit, GPU, input and output hashes). `run` resumes,
   retries failures, and after a config change redoes only what it affects. Statuses Succeeded, Needs Review, Failed,
-  Outdated, Incomplete, Running, Not started; `index.parquet`; plain-English run summaries; cases in batches; a
-  failing case does not stop the others. See [projects](docs/projects.md). A knee scanned more than once at a
+  Outdated, Incomplete, Running, Not started; `index.parquet`; plain-English run summaries; a failing case does
+  not stop the others. See [projects](docs/projects.md). A knee scanned more than once at a
   visit gets the series with the most voxels, then the one acquired last, with a warning, instead of an error.
+- **Parallel runs.** A project runs its cases in parallel: one process per GPU segments and registers them, and
+  CPU worker processes (`workers`, default `auto`) preprocess and finish them. It uses the GPUs and CPUs it is given,
+  e.g. by a SLURM job. On a workstation with one 16 GB GPU and 24 CPU threads, a case takes 31 s instead of 70 s.
+  `run --workers N` sets the number of CPU worker processes. The U-Net segments one patch at a time
+  (its `batch_size` parameter, 4, is gone): as fast, with a third of the GPU memory. See
+  [parallel runs](docs/projects.md#parallel-runs).
 - **Storage.** A project case takes about 330 MB (340 MB with every intermediate output) instead of 1050 MB:
   compressed NRRD images and HDF5 transforms instead of uncompressed NRRD and 300 MB text transforms.
   `retention: final` keeps about 10 MB per case. The single-image command writes the same files as before.

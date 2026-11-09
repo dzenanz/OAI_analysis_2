@@ -8,7 +8,7 @@ machine, or read by other programs.
 
 ```
 M:/OAI_projects/pilot/
-  project.yaml          settings: the pipeline config, data root, batch size, retention, storage formats
+  project.yaml          settings: the pipeline config, data root, workers, retention, storage formats
   cases.csv             one row per case: case_id, patient_id, month, laterality, input
   index.parquet         one row per case: status, the step that failed, a note, the review flags, ...
   runs.jsonl            one line per `oai-analysis run`: when, the command, how many cases, the software versions
@@ -92,13 +92,8 @@ So the same command:
 It leaves Succeeded and Needs Review cases alone. `--from STEP` redoes a step and everything after it even if it is
 up to date, e.g. after replacing the files a `precomputed` segmenter reads.
 
-**Batches.** Cases run in batches of `batch_size` (default 8, or `run --batch-size N`). A batch's cases are
-preprocessed, then segmented one after another, then registered one after another, so each network is loaded once
-and stays in GPU memory for the whole batch; GPU memory is released after each network is done. Then each case
-finishes on its own. A batch holds about 0.5 GB per case in memory.
-
 **Failures.** A step that raises an error fails its case, and the run goes on with the others. Its
-`provenance.json` records the error and the traceback. A crash of the whole process (e.g. a segmentation fault in
+`provenance.json` records the error and the traceback. A crash of one of its processes (e.g. a segmentation fault in
 compiled code) stops the run; the cases it was working on show as Incomplete, and the next `run` resumes them.
 
 **The device.** With `device: auto` (the default) a project runs on the GPU, and stops with a message if there is
@@ -107,6 +102,47 @@ none, rather than run on the CPU without being asked. Set `device: cpu` in `proj
 **Watching a run.** A case's `running.json` gets a heartbeat every minute, and steps that take more than 5 minutes
 log that they are still working, so a stalled run shows in the log. `status` from another window shows which cases
 are Running.
+
+### Parallel runs
+
+Cases run in parallel, on the CPUs and GPUs the `run` process may use:
+
+- One process per GPU loads the networks once, and segments and registers the cases, one at a time, taking them
+  from a queue that all GPUs share. It saves the outputs, and leaves their checks and thumbnails to the CPU worker
+  that finishes the case.
+- `workers` CPU worker processes (default `auto`: one per two CPUs, less one per GPU) do the rest: preprocessing,
+  and once a case's GPU steps are done, the mesh, thickness, atlas map and biomarkers. A free worker finishes the
+  earliest case that is ready, unless few cases wait for the GPUs; then it preprocesses the next one. So the cases
+  started first finish first, and idle CPUs preprocess ahead.
+
+Each process gets an equal share of the CPUs for its threads, so they do not compete for them. A case's steps pass
+it on through its folder, so each process holds only the case it works on: about 1–2 GB of memory per process.
+`run --workers N` sets the number of CPU worker processes, and `--workers 0` runs everything in the `run` process,
+one case after another (e.g. to debug a stage). A pipeline passed to `Project.run()` is sent to the worker
+processes, so its stages must be importable there (defined in a module, not a notebook).
+
+On a workstation with one 16 GB GPU (RTX 5060 Ti) and 24 CPU threads, 27 cases took 31 s each, against 70 s with
+the cases one after another. The GPU process is the bottleneck there: of its 28 s per case, 20 s are the networks
+and most of the rest is writing the compressed probability maps and transforms. Where the CPUs are the bottleneck instead (many GPUs per CPU),
+the run is as fast as the CPU workers.
+
+**On a SLURM cluster**, one job with a few GPUs and CPUs runs a whole project. The run uses the GPUs SLURM gives the
+job (`CUDA_VISIBLE_DEVICES`) and the CPUs (the job's CPU affinity), so nothing needs configuring:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=oai-pilot
+#SBATCH --gres=gpu:2
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=32G
+#SBATCH --time=1-00:00:00
+source ~/oai-env/bin/activate
+oai-analysis run /shared/OAI_projects/pilot
+```
+
+A job that ends (e.g. at its time limit) leaves its unfinished cases to the next `run`, which resumes them; a run on
+another node takes over the cases the ended job was working on once their heartbeat is 5 minutes old. A GPU needs
+about 16 GB for the two networks.
 
 ## When is a step up to date?
 
@@ -118,7 +154,7 @@ redone when:
   image).
 
 Two kinds of parameters do not count, and the [config reference](config.md) marks them:
-- *speed* parameters (e.g. the U-Net's `batch_size`) change only how fast a stage runs;
+- *speed* parameters (a plugin stage's `performance_params`) change only how fast a stage runs;
 - *check* parameters are sanity-check thresholds. Changing one makes the step Outdated, and `run` rechecks the saved
   outputs (a few seconds per case) without redoing the step.
 
@@ -193,7 +229,7 @@ numbers in a varying order. Two runs of the same case differ by 0.035 mm on aver
 95th percentile, up to 2.6 mm at single points).
 
 - `seed` (default 0) seeds Python's, numpy's and torch's random number generators at the start of every step, so a
-  case draws the same random numbers whether it runs in one go, is resumed, or runs in a batch.
+  case draws the same random numbers whether it runs in one go, is resumed, or runs alongside others.
 - `deterministic: true` makes torch use deterministic algorithms where it has them. On the bundled case, two runs then
   differed by 0.0005 mm on average (0.002 mm at the 95th percentile, up to 1.1 mm at single points), about 70 times
   less. Two of the operations registration needs (`grid_sampler_3d_backward`, `avg_pool3d_backward`) have no

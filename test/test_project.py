@@ -9,7 +9,7 @@ import numpy as np
 import pyarrow.parquet as pq
 import pytest
 
-from oai_analysis import OAPipeline, io, provenance, qc
+from oai_analysis import OAPipeline, io, parallel, provenance, qc
 from oai_analysis.atlas import Atlas
 from oai_analysis.project import Project, choose_series, read_manifest
 from oai_analysis.stages import Preprocessor, QCFinding
@@ -62,7 +62,7 @@ def project(tmp_path):
         itk.imwrite(image, str(tmp_path / name))
     cases = [{"case_id": "1_00M_LEFT", "patient_id": "1", "month": 0, "laterality": "left", "input": "a.nrrd"},
              {"case_id": "2_00M_RIGHT", "patient_id": "2", "month": 0, "laterality": "right", "input": "b.nrrd"}]
-    return Project.create(tmp_path / "project", cases, data_root=tmp_path)
+    return Project.create(tmp_path / "project", cases, {"workers": 0}, data_root=tmp_path)
 
 
 def started_times(project, case_id):
@@ -122,7 +122,7 @@ def test_changed_parameter_reruns_only_affected_steps(project):
     np.testing.assert_allclose(mean, [3.0, 3.0])
 
 
-def test_failure_does_not_stop_the_batch(project):
+def test_failure_does_not_stop_the_others(project):
     pipeline = make_pipeline(mesh_generator=FailingMeshGenerator())
     result = project.run(pipeline=pipeline, echo=lambda text: None)
     assert [s.status for s in result] == ["Succeeded", "Failed"]
@@ -320,32 +320,36 @@ def recording_pipeline(fail=False):
     return pipeline, calls
 
 
-def test_batches(project):
-    """A batch's cases are segmented one after another, then registered, then each finishes on its own."""
-    assert project.settings["batch_size"] == 8
-    pipeline, calls = recording_pipeline()
-    result = project.run(pipeline=pipeline, echo=lambda text: None)
-    assert [s.status for s in result] == ["Succeeded", "Succeeded"]
-    assert calls == [("segment", "1_00M_LEFT"), ("segment", "2_00M_RIGHT"),
-                     ("register", "1_00M_LEFT"), ("register", "2_00M_RIGHT"),
-                     ("mesh", "1_00M_LEFT"), ("mesh", "2_00M_RIGHT")]
-    for case_id in ("1_00M_LEFT", "2_00M_RIGHT"):
-        assert not (project.case_folder(case_id) / "running.json").exists()
-
-    # batch_size: 1 runs one case to the end, then the other
-    pipeline, calls = recording_pipeline()
-    project.run(from_step="preprocess", pipeline=pipeline, batch_size=1, echo=lambda text: None)
-    assert calls == [("segment", "1_00M_LEFT"), ("register", "1_00M_LEFT"), ("mesh", "1_00M_LEFT"),
-                     ("segment", "2_00M_RIGHT"), ("register", "2_00M_RIGHT"), ("mesh", "2_00M_RIGHT")]
-
-
-def test_failure_in_a_batch_fails_only_its_case(project):
-    pipeline, calls = recording_pipeline(fail=True)
-    result = project.run(pipeline=pipeline, echo=lambda text: None)
+def test_parallel_run(project):
+    """Worker processes give the results of a run in this process; a failing case stops only itself."""
+    pipeline, _ = recording_pipeline(fail=True)
+    result = project.run(pipeline=pipeline, workers=2, echo=lambda text: None)
     assert [s.status for s in result] == ["Succeeded", "Failed"]
     assert result[1].failed_step == "segment" and result[1].note.endswith("RuntimeError: bad image")
-    assert calls == [("segment", "1_00M_LEFT"), ("segment", "2_00M_RIGHT"),
-                     ("register", "1_00M_LEFT"), ("mesh", "1_00M_LEFT")]  # the failed case goes no further
+    assert not (project.case_folder("2_00M_RIGHT") / "03_register").exists()  # the failed case goes no further
+    for case_id in ("1_00M_LEFT", "2_00M_RIGHT"):
+        assert not (project.case_folder(case_id) / "running.json").exists()
+    log = next((project.path / "logs").glob("*[0-9].log")).read_text()
+    assert "1_00M_LEFT: Segmenting the cartilage" in log  # what the workers print, with the case it is about
+    mean = np.load(project.case_folder("1_00M_LEFT") / "07_biomarkers/mean_thickness/mean_thickness.npy")
+    np.testing.assert_allclose(mean, [2.0, 2.0])
+    record = provenance_of(project, "1_00M_LEFT", "04_mesh")
+    assert record["environment"]["device"] == "cpu"
+    assert "check_params" in provenance_of(project, "1_00M_LEFT", "02_segment")  # checked by a CPU worker
+
+    result = project.run(pipeline=make_pipeline(), workers=2, echo=lambda text: None)  # fixed: resumes
+    assert [s.status for s in result] == ["Succeeded", "Succeeded"]
+    assert provenance_of(project, "1_00M_LEFT", "04_mesh")["started"] == record["started"]
+
+
+def test_parts_and_resources(monkeypatch):
+    assert parallel.parts(make_pipeline()) == (["preprocess"], ["segment", "register"],
+                                               ["mesh", "thickness", "atlas_map", "biomarkers/mean_thickness"])
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "3,5")  # e.g. the GPUs SLURM gave the job
+    assert parallel.gpu_devices("cuda") == ["3", "5"]
+    assert parallel.gpu_devices("cuda:1") == ["5"]
+    assert parallel.gpu_devices("cpu") == [None]
+    assert parallel.default_workers(24, 4) == 8 and parallel.default_workers(2, 1) == 1
 
 
 def test_performance_params_do_not_make_outputs_outdated(project):
@@ -419,7 +423,7 @@ def test_visits_of_a_knee_are_compared(tmp_path):
     itk.imwrite(ball_image(), str(tmp_path / "a.nrrd"))
     cases = [{"case_id": f"1_{m:02d}M_LEFT", "patient_id": "1", "month": m, "laterality": "left", "input": "a.nrrd"}
              for m in (0, 12, 24, 36)] + [{"case_id": "2_00M_LEFT", "laterality": "left", "input": "a.nrrd"}]
-    project = Project.create(tmp_path / "project", cases, data_root=tmp_path)
+    project = Project.create(tmp_path / "project", cases, {"workers": 0}, data_root=tmp_path)
     pipeline = make_pipeline()
     project.run(pipeline=pipeline, echo=lambda text: None)
 

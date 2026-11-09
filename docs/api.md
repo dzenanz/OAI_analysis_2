@@ -60,8 +60,9 @@ flagged = project.select(project.status(), needs_review=True)
 
 - `Project.create(path, cases, pipeline_config=None, data_root=None, retention="checkpoints")` starts a project
   from a list of `cases.csv` rows (dicts with `case_id, patient_id, month, laterality, input`).
-- `run(case_ids=None, from_step=None, pipeline=None, batch_size=None)`: `pipeline` replaces the one built from
-  `project.yaml`, e.g. to add a stage that is not registered.
+- `run(case_ids=None, from_step=None, pipeline=None, workers=None)`: `pipeline` replaces the one built from
+  `project.yaml`, e.g. to add a stage that is not registered; it is sent to the worker processes, so its stages
+  must be importable there (defined in a module, not in a notebook). `workers=0` runs in this process.
 - `status()` returns a `CaseStatus` per case: `status`, `steps` (step name → `done`, `failed`, `outdated` or
   `missing`), `note`, `failed_step`, `review` (step → messages), `duration_s`, `finished`.
 - `case_folder(case_id)` is where a case's files are; [projects](projects.md#a-cases-folder) describes them.

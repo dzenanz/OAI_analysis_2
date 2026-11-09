@@ -52,9 +52,9 @@ def main(argv=None):
     run_parser = commands.add_parser("run", parents=[selectors], help="Process the cases that are not up to date")
     run_parser.add_argument("--from", dest="from_step", metavar="STEP",
                             help="Redo this step, and the steps that use its outputs, even if up to date")
-    run_parser.add_argument("--batch-size", type=int, metavar="N",
-                            help="Cases whose images go through segmentation and registration together "
-                                 "(default: batch_size in project.yaml)")
+    run_parser.add_argument("--workers", type=int, metavar="N",
+                            help="CPU worker processes; 0 runs everything in this process, one case after another "
+                                 "(default: workers in project.yaml, auto: as many as the CPUs allow)")
     status_parser = commands.add_parser("status", parents=[selectors], help="Show the status of every case")
     status_parser.add_argument("--csv", help="Also write the table to this CSV file")
     args = parser.parse_args(argv)
@@ -90,9 +90,9 @@ def run(args):
 
     project = Project(args.project)
     case_ids = _selected(project, args, project.pipeline())
-    if args.batch_size is not None and args.batch_size < 1:
-        sys.exit("--batch-size must be at least 1")
-    statuses = project.run([s.case_id for s in case_ids], args.from_step, batch_size=args.batch_size)
+    if args.workers is not None and args.workers < 0:
+        sys.exit("--workers must be 0 or more")
+    statuses = project.run([s.case_id for s in case_ids], args.from_step, workers=args.workers)
     return 1 if any(s.status == FAILED for s in statuses) else 0
 
 

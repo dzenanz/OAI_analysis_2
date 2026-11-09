@@ -16,10 +16,8 @@ class UNetSegmenter(Segmenter):
     """The 3D U-Net trained on OAI knees, applied in overlapping patches."""
 
     name: ClassVar[str] = "unet3d_oai"
-    performance_params: ClassVar[tuple[str, ...]] = ("batch_size",)
     check_params: ClassVar[tuple[str, ...]] = ("fc_volume_ml", "tc_volume_ml", "max_outside_main_pieces",
                                                "max_uncertainty")
-    batch_size: int = 4  # patches per pass through the network
     overlap_size: tuple[int, int, int] = (16, 16, 8)  # voxels shared by neighbouring patches
     # checks, tuned on the benchmark cases and the Dec 18, 2024 triage
     fc_volume_ml: tuple[float, float] = (4.0, 20.0)  # usual range of the femoral cartilage volume
@@ -32,7 +30,6 @@ class UNetSegmenter(Segmenter):
             ckpoint_path=str(models_dir() / "segmentation_model.pth.tar"),
             training_config_file=str(models_dir() / "segmentation_train_config.pth.tar"),
             device=device,
-            batch_size=self.batch_size,
             overlap_size=self.overlap_size,
             output_prob=True,
             output_itk=True,

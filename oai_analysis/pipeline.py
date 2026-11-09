@@ -162,14 +162,17 @@ class OAPipeline:
                        f'biomarker "{e.name}"') for e in self.biomarker_extractors]
         return steps
 
-    def setup(self):
-        """Load models. run_case() calls this when needed, so calling it directly is optional."""
+    def setup(self, stages=None):
+        """
+        Load models. run_case() calls this when needed, so calling it directly is optional. stages (default: all)
+        limits it to those, e.g. in a process that runs only some of the steps.
+        """
         if self._is_set_up:
             return
         self.device = self.device or default_device()
         if self.deterministic:
             use_deterministic_algorithms()
-        for stage in self.stages:
+        for stage in self.stages if stages is None else stages:
             stage.setup(self.device)
         self._is_set_up = True
 
@@ -186,7 +189,7 @@ class OAPipeline:
         for step in self.steps():
             with _timed(result, step.name):
                 writer.write(step, self.run_step(step, result))
-            if step.name in BATCHED_STEPS:
+            if step.name in GPU_STEPS:
                 release_gpu_memory()
         return result
 
@@ -262,9 +265,8 @@ STEPS = {
     "thickness": ("thickness_estimator", ("mesh", "segment", "register"), "thickness measurement"),
     "atlas_map": ("atlas_mapper", ("thickness", "register"), "mapping to the atlas"),
 }
-# the steps that use a neural network; a project runs each of them for all the cases of a batch, one after
-# another, while the network is loaded and warm, then finishes each case on its own
-BATCHED_STEPS = ("segment", "register")
+# the steps that use a neural network; a project runs them in one process per GPU, which loads the networks once
+GPU_STEPS = ("segment", "register")
 
 
 @dataclass(frozen=True)
@@ -285,9 +287,9 @@ class StepOutputs:
 
 def release_gpu_memory():
     """
-    Give the GPU memory PyTorch keeps cached back, once a network is done with all the cases it gets. Otherwise
-    segmentation and registration together reserve more than a 16 GB GPU has, and Windows makes up the difference
-    with much slower system memory: registration took 180 s instead of 17 s.
+    Give the GPU memory PyTorch keeps cached back after a network ran. Otherwise segmentation and registration
+    together reserve more than a 16 GB GPU has, and Windows makes up the difference with much slower system memory:
+    registration took 180 s instead of 17 s.
     """
     if torch.cuda.is_available():
         torch.cuda.empty_cache()

@@ -4,7 +4,6 @@ Created by zhenlinx on 1/19/19
 """
 from abc import ABC, abstractmethod
 import torch
-import numpy as np
 
 from oai_analysis.stages.segmentation.image_transforms import Partition
 from oai_analysis.stages.segmentation.module_parameters import ParameterDict
@@ -102,21 +101,12 @@ class Segmenter3DInPatchClassWise(Segmenter3DInPatch):
             self.pred_setup()
         sample = {'image': image, 'name': ''}
         image_tiles = self.partition(sample)['image']
-        batch_size = self.config['batch_size']
-        outputs = []  # a list of lists that store outputs at each step
-        # for i in range(1):
+        outputs = []
         with torch.no_grad():
-            for i in range(0, np.ceil(image_tiles.size()[0] / batch_size).astype(int)):
-                temp_input = image_tiles.narrow(0, batch_size * i,
-                                                batch_size if batch_size * (i + 1) <=
-                                                              image_tiles.size()[0]
-                                                else image_tiles.size()[0] - batch_size * i)
-
-                # predict through model 1
-                temp_output = self.model(temp_input.to(self.device)).cpu()
-
-                outputs.append(temp_output)
-                del temp_input
+            # one patch at a time: it keeps a GPU busy, and 4 at a time were no faster but reserved up to 14 GB of GPU
+            # memory instead of 4.6 GB, which on a 16 GB GPU, alternating with registration, made it up to 6x slower
+            for patch in image_tiles.split(1):
+                outputs.append(self.model(patch.to(self.device)).cpu())
 
             predictions = torch.sigmoid(torch.cat(outputs, dim=0))
 

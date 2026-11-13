@@ -91,16 +91,8 @@ def get_itk_mesh(vtk_mesh):
     points = vtk_mesh.GetPoints().GetData()
     points_numpy = np.array(points).flatten().astype("float32")
 
-    polys = vtk_mesh.GetPolys().GetData()
-    polys_numpy = np.array(polys).flatten()
-
-    # Triangle Mesh
-    vtk_cells_count = vtk_mesh.GetNumberOfPolys()
-    polys_numpy = np.reshape(polys_numpy, [vtk_cells_count, Dimension + 1])
-
-    # Extracting only the points by removing first column that denotes the VTK cell type
-    polys_numpy = polys_numpy[:, 1:]
-    polys_numpy = polys_numpy.flatten().astype(np.uint64)
+    # the point ids of the triangles, one after another
+    polys_numpy = ns.vtk_to_numpy(vtk_mesh.GetPolys().GetConnectivityArray()).astype(np.uint64)
 
     # Get point data from VTK mesh to insert in ITK Mesh
     point_data_numpy = np.array(

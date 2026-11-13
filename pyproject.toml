@@ -190,3 +190,8 @@ exclude_lines = [
 
 [tool.pytest.ini_options]
 testpaths = ["test"]
+filterwarnings = [
+  # scikit-image <= 0.26 assigns ndarray.shape in marching_cubes LUT loading,
+  # deprecated in NumPy 2.5. Upstream issue; remove once a fixed release ships.
+  "ignore:Setting the shape on a NumPy array:DeprecationWarning:skimage.measure._marching_cubes_lewiner",
+]

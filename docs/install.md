@@ -48,6 +48,35 @@ out and make the build importable in the environment. Note that `icon_registrati
 installs the PyPI `itk` anyway unless it is already there; installing with `--no-deps` and then the other
 dependencies avoids that.
 
+### Building ITK 6 yourself
+
+A build of ITK 6 works with this package if it wraps Python with these settings, beyond ITK's defaults:
+
+| CMake setting | Why |
+|---|---|
+| `ITK_WRAP_PYTHON=ON` | the Python package |
+| `Module_Cuberille=ON` | the `cuberille` mesh generator |
+| `Module_ParabolicMorphology=ON` | the distance maps of the `distance_transform` thickness estimator |
+| `ITK_WRAP_unsigned_short=ON` | reading the OAI DICOM images, which are 16-bit unsigned |
+| `ITK_WRAP_double=ON` | registration, which works on `itk.D` images and transforms |
+| `ITK_WRAP_vector_double=ON` | the displacement fields of the registration transforms |
+| `ITK_WRAP_covariant_vector_double=ON` | the same transforms; without it they cannot be built |
+
+Without the wrapped types, a case fails with e.g. `KeyError: itkImageD3`. For example, with the environment's Python
+and the ITK sources in `ITK`:
+
+```
+cmake -S ITK -B ITK-build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DPython3_EXECUTABLE=$(which python3) \
+  -DITK_WRAP_PYTHON=ON -DModule_Cuberille=ON -DModule_ParabolicMorphology=ON -DITK_WRAP_unsigned_short=ON \
+  -DITK_WRAP_double=ON -DITK_WRAP_vector_double=ON -DITK_WRAP_covariant_vector_double=ON
+cmake --build ITK-build --config Release
+```
+
+The build writes `ITK-build/Wrapping/Generators/Python/WrapITK.pth`; copying it into the environment's
+`site-packages` makes the build importable (`python -c "import itk; print(itk.Version.GetITKVersion())"`). Then
+install this package without the `itk` extra, and `icon_registration` and `unigradicon` with `--no-deps`, so that pip
+does not install the PyPI `itk` over the build. The pipeline works with both ITK 5.4 and ITK 6.
+
 ## 4. Data and network weights
 
 The network weights (segmentation U-Net, uniGradICON, the GradICON knee model) and the test data are downloaded on

@@ -5,6 +5,7 @@ import trimesh
 from pathlib import Path
 import numpy as np
 import itk
+from scipy.spatial import cKDTree
 from oai_analysis.data import test_data_dir as data_dir
 
 vtk = pytest.importorskip("vtk")
@@ -19,7 +20,11 @@ def test_get_mesh():
 
     trimesh = mp.get_trimesh(mesh)
     baseline_trimesh = mp.get_trimesh(baseline)
-    np.testing.assert_allclose(trimesh.vertices, baseline_trimesh.vertices, atol=0.02)
+    # ITK 6's cuberille makes the same triangles with a few more vertices (18 here), so compare by nearest vertex
+    assert len(trimesh.faces) == len(baseline_trimesh.faces)
+    assert 0 <= len(trimesh.vertices) - len(baseline_trimesh.vertices) < 0.001 * len(baseline_trimesh.vertices)
+    distance, _ = cKDTree(trimesh.vertices).query(baseline_trimesh.vertices)
+    assert distance.max() < 0.02
 
 
 def test_get_cell_normals():

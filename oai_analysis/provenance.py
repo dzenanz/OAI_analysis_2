@@ -73,6 +73,10 @@ def software() -> dict:
             versions[package] = version(package)
         except PackageNotFoundError:
             versions[package] = None
+    if versions["itk"] is None:  # a build of ITK made importable without pip, e.g. through WrapITK.pth
+        import itk
+
+        versions["itk"] = itk.Version.GetITKVersion()
     versions["python"] = platform.python_version()
     versions.update(_git())
     return versions

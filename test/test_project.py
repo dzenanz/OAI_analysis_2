@@ -482,6 +482,12 @@ def test_thumbnails(project):
     assert project.status(make_pipeline())[0].status == "Succeeded"
 
 
+def test_software_versions():
+    import itk
+
+    assert provenance.software()["itk"] == itk.Version.GetITKVersion()  # also for a build installed without pip
+
+
 def test_container_provenance(monkeypatch):
     monkeypatch.setenv("OAI_ANALYSIS_IMAGE", "oai-analysis:1.0")
     monkeypatch.setenv("OAI_ANALYSIS_IMAGE_DIGEST", "sha256:abc")

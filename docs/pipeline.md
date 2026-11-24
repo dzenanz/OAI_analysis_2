@@ -9,7 +9,7 @@ segmentation handles them separately.
 
 | # | Step | Stage (config key) | Default | Reads | Produces |
 |---|---|---|---|---|---|
-| 1 | `preprocess` | `preprocessor` | `oai_default` | the input image | the image, in the atlas orientation, intensities 0–1 |
+| 1 | `preprocess` | `preprocessor` | `oai_default` | the input image | the image, bias-corrected (N4), in the atlas orientation, intensities 0–1 |
 | 2 | `segment` | `segmenter` | `unet3d_oai` | 1 | a probability map per structure |
 | 3 | `register` | `registerer` | `unigradicon` | 1, the atlas image | transforms between the image and the atlas |
 | 4 | `mesh` | `mesh_generator` | `cuberille` | 2 | a surface per structure, in the image's space |

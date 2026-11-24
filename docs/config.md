@@ -48,10 +48,12 @@ Changing any other parameter makes the step, and every step after it, outdated, 
 
 `oai_analysis.stages.preprocessing.OAIPreprocessor`
 
-Mirror right knees to look like left ones, reorient to the atlas orientation, and window the intensities.
+Correct the intensity bias (N4), mirror right knees to look like left ones, reorient to the atlas orientation, and
+window the intensities.
 
 | Parameter | Default | Meaning |
 |---|---|---|
+| `n4_shrink_factor` | `4` | N4 fits the bias field to the input shrunk this many times along each axis; None skips the correction. The 8-channel knee coil of the 96M visit leaves a strong bias, which degrades the segmentation |
 | `window_min_percentile` | `0.1` | Intensities at or below this percentile become 0 |
 | `window_max_percentile` | `99.9` | Intensities at or above this percentile become 1 |
 | `expected_spacing_mm` | `[0.365, 0.365, 0.7]` | *check*. OAI sagittal 3D DESS |

@@ -12,6 +12,7 @@ from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
 from oai_analysis import OAPipeline
 from oai_analysis.algorithms import mesh_processing as mp
 from oai_analysis.atlas import Atlas
+from oai_analysis.stages import preprocessing
 from oai_analysis.stages import (
     AtlasMapper,
     BiomarkerExtractor,
@@ -65,7 +66,8 @@ def test_preprocessor(laterality):
     image = ball_image()
     image.SetOrigin([1.0, 2.0, 3.0])
     preprocessor = OAIPreprocessor()
-    assert preprocessor.result_params() == {"window_min_percentile": 0.1, "window_max_percentile": 99.9}
+    assert preprocessor.result_params() == {"n4_shrink_factor": 4, "window_min_percentile": 0.1,
+                                            "window_max_percentile": 99.9}
 
     result = preprocessor.run(image, CaseInfo("x.nii.gz", laterality))
     np.testing.assert_array_equal(itk.array_from_matrix(image.GetDirection()), np.eye(3))  # the input is unchanged
@@ -78,6 +80,16 @@ def test_preprocessor(laterality):
                                   itk.array_from_matrix(expected.GetDirection()))
     values = itk.array_view_from_image(result)
     assert values.min() == 0.0 and values.max() == 1.0
+
+
+def test_correct_bias():
+    image = ball_image(radius_mm=24.0, size=64, spacing=1.0)
+    x = np.mgrid[:64, :64, :64][2]
+    values = itk.array_view_from_image(image)
+    values *= 100 * np.exp(0.02 * (x - 32))  # brighter towards one side, up to 1.9 times the middle
+    inside = values > 0
+    corrected = itk.array_from_image(preprocessing.correct_bias(image))
+    assert corrected[inside].std() / corrected[inside].mean() < values[inside].std() / values[inside].mean() / 4
 
 
 def test_cuberille_mesh_generator():

@@ -33,6 +33,25 @@ def into_canonical_orientation(image, flip_left_right):
     return oriented_image
 
 
+def correct_bias(image, shrink_factor=4):
+    """
+    N4 bias field correction. N4 fits the field (a B-spline) to the image shrunk by shrink_factor; the full-resolution
+    image is divided by that field, evaluated at full resolution.
+    """
+    image = itk.cast_image_filter(image, ttype=(type(image), itk.Image[itk.F, 3]))
+    small = itk.shrink_image_filter(image, shrink_factors=[shrink_factor] * 3)
+    mask = itk.otsu_threshold_image_filter(small, inside_value=0, outside_value=1,  # the knee, not the background
+                                           ttype=(type(small), itk.Image[itk.UC, 3]))
+    N4 = itk.N4BiasFieldCorrectionImageFilter[type(image), type(mask), type(image)]
+    n4 = N4.New(small, mask_image=mask, number_of_fitting_levels=4, maximum_number_of_iterations=[50] * 4)
+    n4.Update()
+    # a filter evaluates the field on the grid of its input; BSplineControlPointImageFilter is not wrapped for Python
+    log_field = N4.New(image).ReconstructBiasField(n4.GetLogBiasFieldControlPointLattice())
+    corrected = itk.image_from_array(itk.array_view_from_image(image) / np.exp(itk.array_view_from_image(log_field)))
+    corrected.CopyInformation(image)
+    return corrected
+
+
 def window_intensities(image, window_min_percentile=0.1, window_max_percentile=99.9, output_min=0.0, output_max=1.0):
     image_array = itk.GetArrayViewFromImage(image)
     win_min = float(np.percentile(image_array, window_min_percentile))
@@ -48,10 +67,16 @@ def window_intensities(image, window_min_percentile=0.1, window_max_percentile=9
 @register
 @dataclass
 class OAIPreprocessor(Preprocessor):
-    """Mirror right knees to look like left ones, reorient to the atlas orientation, and window the intensities."""
+    """
+    Correct the intensity bias (N4), mirror right knees to look like left ones, reorient to the atlas orientation, and
+    window the intensities.
+    """
 
     name: ClassVar[str] = "oai_default"
     check_params: ClassVar[tuple[str, ...]] = ("expected_spacing_mm", "spacing_tolerance", "expected_size")
+    # N4 fits the bias field to the input shrunk this many times along each axis; None skips the correction. The
+    # 8-channel knee coil of the 96M visit leaves a strong bias, which degrades the segmentation
+    n4_shrink_factor: int | None = 4
     window_min_percentile: float = 0.1  # intensities at or below this percentile become 0
     window_max_percentile: float = 99.9  # intensities at or above this percentile become 1
     expected_spacing_mm: tuple[float, float, float] = (0.365, 0.365, 0.7)  # OAI sagittal 3D DESS
@@ -61,6 +86,8 @@ class OAIPreprocessor(Preprocessor):
     expected_size: tuple[int, int, int] = (384, 384, 160)  # voxels, OAI sagittal 3D DESS; review if different
 
     def run(self, image: itk.Image, case: CaseInfo) -> itk.Image:
+        if self.n4_shrink_factor:
+            image = correct_bias(image, self.n4_shrink_factor)
         image = into_canonical_orientation(image, case.laterality == "right")  # simplifies mesh processing
         return window_intensities(image, self.window_min_percentile, self.window_max_percentile)
 

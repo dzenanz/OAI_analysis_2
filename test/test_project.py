@@ -379,6 +379,21 @@ class CheckedThickness(ConstantThickness):
 
 
 @dataclass
+class MeasuredThickness(ConstantThickness):
+    """CheckedThickness with its check split into measure() and judge(), so it can be rechecked from provenance."""
+    name: ClassVar[str] = "measured"
+    check_params: ClassVar[tuple[str, ...]] = ("max_mm",)
+    max_mm: float = 3.0
+
+    def measure(self, case):
+        return {"FC": float(qc.point_values(case.thickness["FC"].mesh).max())}
+
+    def judge(self, measures):
+        thickness = measures["FC"]
+        return [qc.finding(thickness > self.max_mm, "thickness.too_thick", f"FC is {thickness} mm thick", thickness)]
+
+
+@dataclass
 class CheckedSegmenter(FakeSegmenter):
     """Fails the case whose image has spacing 0.6."""
     name: ClassVar[str] = "checked"
@@ -417,6 +432,29 @@ def test_review_flags(project):
     assert [s.status for s in result] == ["Succeeded", "Succeeded"]
     after = provenance_of(project, "1_00M_LEFT", "05_thickness")
     assert after["started"] == record["started"] and after["qc"][0]["severity"] == "info"
+
+
+def test_recheck_from_measures(project):
+    """A new threshold rechecks a step from the measures in its provenance, even after retention: final."""
+    project.settings["retention"] = "final"
+    pipeline = make_pipeline(extractor=AtlasOnlyMeanThickness())
+    pipeline.thickness_estimator = MeasuredThickness(thickness=4.0)
+    result = project.run(pipeline=pipeline, echo=lambda text: None)
+    assert [s.status for s in result] == ["Needs Review", "Needs Review"]
+    assert provenance_of(project, "1_00M_LEFT", "05_thickness")["measures"] == {"FC": 4.0}
+
+    def started():
+        return {step.name: provenance_of(project, "1_00M_LEFT", step.folder)["started"] for step in pipeline.steps()}
+
+    before = started()
+    pipeline.thickness_estimator.max_mm = 5.0
+    result = project.run(pipeline=pipeline, workers=2, echo=lambda text: None)
+    assert [s.status for s in result] == ["Succeeded", "Succeeded"]
+    assert started() == before  # no step was redone
+    folder = project.case_folder("1_00M_LEFT")
+    assert [p.name for p in (folder / "05_thickness").iterdir()] == ["provenance.json"]
+    record = provenance_of(project, "1_00M_LEFT", "05_thickness")
+    assert record["qc"][0]["severity"] == "info" and record["check_params"] == {"max_mm": 5.0}
 
 
 def test_visits_of_a_knee_are_compared(tmp_path):

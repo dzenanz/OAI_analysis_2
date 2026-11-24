@@ -1,9 +1,12 @@
+import json
+
 import itk
 import numpy as np
 import pytest
 
 from oai_analysis import qc
 from oai_analysis.stages import CaseArtifacts, CaseInfo, OAIPreprocessor, UNetSegmenter
+from oai_analysis.stages.thickness import thickness_findings
 from oai_analysis.atlas import Atlas
 from test.test_stages import ball_image
 
@@ -62,10 +65,22 @@ def test_segmenter_check():
     empty = itk.image_from_array(np.zeros_like(itk.array_from_image(image)))
     empty.CopyInformation(image)
     case = CaseArtifacts(case=CaseInfo("knee.nrrd", "left"), atlas=None, probability={"FC": image, "TC": empty})
-    findings = {(f.code, f.severity) for f in UNetSegmenter(fc_volume_ml=(4, 20)).check(case)}
+    segmenter = UNetSegmenter(fc_volume_ml=(4, 20))
+    findings = {(f.code, f.severity) for f in segmenter.check(case)}
     assert findings == {("segment.volume", "review"),  # 1 ml of femoral cartilage
                         ("segment.pieces", "review"), ("segment.uncertainty", "info"),
                         ("segment.empty", "fail")}  # no tibial cartilage
+    # what a project records in provenance.json is enough to check again, with other thresholds too
+    recorded = json.loads(json.dumps(segmenter.measure(case)))
+    assert segmenter.judge(recorded) == segmenter.check(case)
+    assert {f.code: f.severity for f in UNetSegmenter(fc_volume_ml=(0.5, 20)).judge(recorded)}["segment.volume"] == "info"
+
+
+def test_thickness_measures_hold_their_threshold():
+    measures = {"max_thickness_mm": 6.0, "too_thick": {"FC": 0.02}}
+    assert thickness_findings(measures, 6.0, 0.01)[0].severity == "review"
+    assert thickness_findings(measures, 6.0, 0.05)[0].severity == "info"
+    assert thickness_findings(measures, 5.0, 0.01) is None  # taken at 6 mm: only the outputs can tell
 
 
 def test_preprocessor_check():
@@ -75,5 +90,7 @@ def test_preprocessor_check():
     findings = {f.code: f.severity for f in OAIPreprocessor().check(case)}
     assert findings == {"preprocess.spacing": "review", "preprocess.size": "review",
                         "preprocess.median_intensity": "info"}
+    recorded = json.loads(json.dumps(OAIPreprocessor().measure(case)))
+    assert OAIPreprocessor().judge(recorded) == OAIPreprocessor().check(case)
     image.SetDirection(itk.matrix_from_array(np.array([[0.0, 0, -1], [1, 0, 0], [0, 1, 0]])))
     assert {f.code: f.severity for f in OAIPreprocessor().check(case)}["preprocess.orientation"] == "fail"

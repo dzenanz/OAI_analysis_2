@@ -27,10 +27,13 @@ class ClosestPointAtlasMapper(AtlasMapper):
         mapped = mp.map_attributes(mesh_atlas, atlas.inner_mesh[structure])
         return MeshResult(mapped, intermediates={"mesh_atlas": mesh_atlas})
 
-    def check(self, case: CaseArtifacts) -> list[QCFinding]:
+    def measure(self, case: CaseArtifacts) -> dict:
+        return {"no_thickness": {structure: float(np.mean(case.atlas_thickness(structure) < NO_THICKNESS_MM))
+                                 for structure in case.atlas_mapped}}
+
+    def judge(self, measures: dict) -> list[QCFinding]:
         findings = []
-        for structure in case.atlas_mapped:
-            without = float(np.mean(case.atlas_thickness(structure) < NO_THICKNESS_MM))
+        for structure, without in measures["no_thickness"].items():
             findings.append(qc.finding(without > self.max_without_thickness, "atlas_map.no_thickness",
                                        f"the {qc.STRUCTURE_NAMES[structure]} has no thickness on "
                                        f"{qc.percent(without)} of the atlas surface "

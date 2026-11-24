@@ -12,12 +12,24 @@ from oai_analysis.registry import register
 from oai_analysis.stages.base import CaseArtifacts, MeshResult, QCFinding, ThicknessEstimator
 
 
-def thickness_findings(case, max_thickness_mm, max_too_thick) -> list[QCFinding]:
-    """Flag a structure thicker than max_thickness_mm on more than max_too_thick of its vertices."""
-    findings = []
+def thickness_measures(case, max_thickness_mm) -> dict:
+    """The fraction of each structure's vertices thicker than max_thickness_mm."""
+    too_thick = {}
     for structure, result in case.thickness.items():
         thickness = qc.point_values(result.mesh)
-        too_thick = float(np.mean(thickness > max_thickness_mm)) if len(thickness) else 0.0
+        too_thick[structure] = float(np.mean(thickness > max_thickness_mm)) if len(thickness) else 0.0
+    return {"max_thickness_mm": max_thickness_mm, "too_thick": too_thick}
+
+
+def thickness_findings(measures, max_thickness_mm, max_too_thick) -> list[QCFinding] | None:
+    """
+    Flag a structure thicker than max_thickness_mm on more than max_too_thick of its vertices. None for measures
+    taken at another max_thickness_mm.
+    """
+    if measures["max_thickness_mm"] != max_thickness_mm:
+        return None
+    findings = []
+    for structure, too_thick in measures["too_thick"].items():
         findings.append(qc.finding(too_thick > max_too_thick, "thickness.too_thick",
                                    f"the {qc.STRUCTURE_NAMES[structure]} is thicker than {max_thickness_mm} mm "
                                    f"on {qc.percent(too_thick)} of its surface "
@@ -65,8 +77,11 @@ class MeshSplittingThickness(ThicknessEstimator):
         inner_with_thickness, outer_with_thickness = mp.get_distance(inner, outer)
         return MeshResult(outer_with_thickness, intermediates={"inner": inner_with_thickness})
 
-    def check(self, case: CaseArtifacts) -> list[QCFinding]:
-        return thickness_findings(case, self.max_thickness_mm, self.max_too_thick)
+    def measure(self, case: CaseArtifacts) -> dict:
+        return thickness_measures(case, self.max_thickness_mm)
+
+    def judge(self, measures: dict) -> list[QCFinding] | None:
+        return thickness_findings(measures, self.max_thickness_mm, self.max_too_thick)
 
 
 def sample_distance_from_image(thickness_image, mesh):
@@ -102,5 +117,8 @@ class DistanceTransformThickness(ThicknessEstimator):
         return MeshResult(sample_distance_from_image(thickness_image, mesh),
                           intermediates={"thickness_image": thickness_image})
 
-    def check(self, case: CaseArtifacts) -> list[QCFinding]:
-        return thickness_findings(case, self.max_thickness_mm, self.max_too_thick)
+    def measure(self, case: CaseArtifacts) -> dict:
+        return thickness_measures(case, self.max_thickness_mm)
+
+    def judge(self, measures: dict) -> list[QCFinding] | None:
+        return thickness_findings(measures, self.max_thickness_mm, self.max_too_thick)

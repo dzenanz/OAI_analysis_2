@@ -68,10 +68,27 @@ class Stage(ABC):
 
     def check(self, case: CaseArtifacts) -> list[QCFinding]:
         """
-        Sanity-check what this stage put in case. A project calls it after the stage succeeds. Default: no
-        findings.
+        Sanity-check what this stage put in case. A project calls it after the stage succeeds. Default: judge() of
+        measure(), or no findings for a stage without measure().
         """
-        return []
+        measures = self.measure(case)
+        return [] if measures is None else self.judge(measures)
+
+    def measure(self, case: CaseArtifacts) -> dict | None:
+        """
+        The numbers the checks look at, as plain JSON values. A project keeps them in provenance.json, so that new
+        thresholds (check_params) recheck the step with judge() alone, without its outputs, which retention: final
+        deletes. Default: None, for a stage whose check() looks at its outputs itself.
+        """
+        return None
+
+    def judge(self, measures: dict) -> list[QCFinding] | None:
+        """
+        The findings of the checks, from what measure() returned and the check_params. None when the measures
+        cannot answer the current check_params, e.g. they were taken at another threshold; the step is then
+        rechecked from its outputs.
+        """
+        raise NotImplementedError
 
 
 @dataclass

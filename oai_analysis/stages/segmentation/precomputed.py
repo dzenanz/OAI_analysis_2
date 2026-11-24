@@ -5,7 +5,7 @@ import itk
 
 from oai_analysis.registry import register
 from oai_analysis.stages.base import CaseArtifacts, CaseInfo, QCFinding, Segmenter
-from oai_analysis.stages.segmentation.checks import segmentation_findings
+from oai_analysis.stages.segmentation.checks import segmentation_findings, segmentation_measures
 
 
 @register
@@ -42,6 +42,9 @@ class PrecomputedSegmenter(Segmenter):
                                                      reference_image=image)
                 for structure, path in self.files(case).items()}
 
-    def check(self, case: CaseArtifacts) -> list[QCFinding]:
-        return segmentation_findings(case, self.fc_volume_ml, self.tc_volume_ml, self.max_outside_main_pieces,
+    def measure(self, case: CaseArtifacts) -> dict:
+        return segmentation_measures(case)
+
+    def judge(self, measures: dict) -> list[QCFinding]:
+        return segmentation_findings(measures, self.fc_volume_ml, self.tc_volume_ml, self.max_outside_main_pieces,
                                      self.max_uncertainty)

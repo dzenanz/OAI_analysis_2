@@ -5,7 +5,7 @@ import itk
 
 from oai_analysis.data import models_dir, models_sha256
 from oai_analysis.registry import register
-from oai_analysis.stages.segmentation.checks import segmentation_findings
+from oai_analysis.stages.segmentation.checks import segmentation_findings, segmentation_measures
 from oai_analysis.stages.segmentation.segmenter import Segmenter3DInPatchClassWise
 from oai_analysis.stages.base import CaseArtifacts, CaseInfo, QCFinding, Segmenter
 
@@ -43,6 +43,9 @@ class UNetSegmenter(Segmenter):
         FC_prob, TC_prob = self._segmenter.segment(image, if_output_prob_map=True, if_output_itk=True)
         return {"FC": FC_prob, "TC": TC_prob}
 
-    def check(self, case: CaseArtifacts) -> list[QCFinding]:
-        return segmentation_findings(case, self.fc_volume_ml, self.tc_volume_ml, self.max_outside_main_pieces,
+    def measure(self, case: CaseArtifacts) -> dict:
+        return segmentation_measures(case)
+
+    def judge(self, measures: dict) -> list[QCFinding]:
+        return segmentation_findings(measures, self.fc_volume_ml, self.tc_volume_ml, self.max_outside_main_pieces,
                                      self.max_uncertainty)

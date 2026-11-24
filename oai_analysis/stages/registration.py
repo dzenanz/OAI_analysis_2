@@ -34,8 +34,11 @@ class UniGradICONRegisterer(Registerer):
                                                    finetune_steps=self.finetune_steps)
         return RegistrationResult(phi_AB, phi_BA)
 
-    def check(self, case: CaseArtifacts) -> list[QCFinding]:
-        return registration_findings(case, self.max_folding, self.min_similarity)
+    def measure(self, case: CaseArtifacts) -> dict:
+        return registration_measures(case)
+
+    def judge(self, measures: dict) -> list[QCFinding]:
+        return registration_findings(measures, self.max_folding, self.min_similarity)
 
 
 @register
@@ -64,14 +67,22 @@ class GradICONKneeRegisterer(Registerer):
                                                    finetune_steps=self.finetune_steps or None)
         return RegistrationResult(phi_AB, phi_BA)
 
-    def check(self, case: CaseArtifacts) -> list[QCFinding]:
-        return registration_findings(case, self.max_folding, self.min_similarity)
+    def measure(self, case: CaseArtifacts) -> dict:
+        return registration_measures(case)
+
+    def judge(self, measures: dict) -> list[QCFinding]:
+        return registration_findings(measures, self.max_folding, self.min_similarity)
 
 
-def registration_findings(case: CaseArtifacts, max_folding, min_similarity) -> list[QCFinding]:
+def registration_measures(case: CaseArtifacts) -> dict:
+    """What the checks of any registerer look at: folding (a fraction of the field) and similarity (a correlation)."""
+    return {"folding": qc.folding_fraction(case.registration.phi_AB),
+            "similarity": qc.similarity_to_atlas(case.image, case.atlas.image, case.registration.phi_AB)}
+
+
+def registration_findings(measures: dict, max_folding, min_similarity) -> list[QCFinding]:
     """The checks of any registerer: the transform does not fold space, and the warped image matches the atlas."""
-    folding = qc.folding_fraction(case.registration.phi_AB)
-    similarity = qc.similarity_to_atlas(case.image, case.atlas.image, case.registration.phi_AB)
+    folding, similarity = measures["folding"], measures["similarity"]
     return [
         qc.finding(folding > max_folding, "register.folding",
                    f"the registration folds space in {qc.percent(folding)} of its field "

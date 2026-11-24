@@ -720,23 +720,37 @@ class _CaseRunner:
         return True
 
     def _recheck(self, step, record):
-        """Check the outputs of a finished step again, e.g. with new thresholds."""
-        if not all(self._load(name) for name in (*step.inputs, step.name)):
+        """
+        Check a finished step again, e.g. with new thresholds: from the measures in its provenance when the stage
+        can judge them, otherwise from its outputs (made again if retention deleted them).
+        """
+        findings = step.stage.judge(record["measures"]) if "measures" in record else None
+        if findings is None and not all(self._load(name) for name in (*step.inputs, step.name)):
             return
         self.progress(f"{self.case_id}: checking {step.description}")
         try:
-            self._check(step, record)
+            self._check(step, record, findings)
         except Exception as e:
             self._record_error(record, e)
-        self._thumbnails(step, only_missing=True)
+        if step.name in self.loaded:
+            self._thumbnails(step, only_missing=True)
         _write_json(self.folder / step.folder / "provenance.json", record)
         if record["status"] != "complete":
             self.failed = True
             del self.records[step.name]
 
-    def _check(self, step, record):
-        """Record what the stage's check() finds; a "fail" finding fails the step."""
-        findings = step.stage.check(self.result)
+    def _check(self, step, record, findings=None):
+        """
+        Record the findings of the stage's checks: the given ones, or those on the outputs in self.result, with
+        what the stage measured. A "fail" finding fails the step.
+        """
+        if findings is None:
+            measures = step.stage.measure(self.result)
+            if measures is None:
+                findings = step.stage.check(self.result)
+            else:
+                record["measures"] = measures
+                findings = step.stage.judge(measures)
         record["qc"] = [dataclasses.asdict(f) for f in findings]
         record["check_params"] = _check_params(step.stage)
         failures = [f.message for f in findings if f.severity == "fail"]

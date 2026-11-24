@@ -155,8 +155,10 @@ redone when:
 
 Two kinds of parameters do not count, and the [config reference](config.md) marks them:
 - *speed* parameters (a plugin stage's `performance_params`) change only how fast a stage runs;
-- *check* parameters are sanity-check thresholds. Changing one makes the step Outdated, and `run` rechecks the saved
-  outputs (a few seconds per case) without redoing the step.
+- *check* parameters are sanity-check thresholds. Changing one makes the step Outdated, and `run` rechecks the step
+  without redoing it: from the measures in its `provenance.json`, or, for a stage that records none, from its saved
+  outputs (a few seconds per case). Changing `max_thickness_mm` needs the thickness outputs, as the measures count
+  the vertices above the old value.
 
 ## Provenance
 
@@ -174,6 +176,7 @@ Two kinds of parameters do not count, and the [config reference](config.md) mark
 | `environment` | host, platform, device, GPU, CUDA version, the command, `seed`, `deterministic`, and the `container` image and digest when run in one |
 | `run_id`, `started`, `finished`, `duration_s` | when, and how long; `run_id` names the run's log in `logs/` |
 | `qc` | the sanity-check findings: severity (`info`, `review`, `fail`), code, plain-English message, measured value |
+| `measures` | the numbers the checks looked at, from which new thresholds recheck the step |
 
 The hashes are kept even when `retention` deletes the files, so the record of what was computed survives.
 
@@ -250,7 +253,9 @@ Both settings, and the container image when run in one (see [Docker](install.md#
 | `all` | also the stages' intermediate outputs (e.g. `FC_inner.vtk`, the surfaces moved into atlas space) | about 340 MB |
 | `final` | once a case finishes: the atlas-mapped surfaces, the biomarkers, the thumbnails and every `provenance.json` | about 10 MB |
 
-With `final`, a step that needs deleted files gets them by redoing the earlier steps.
+With `final`, a step that needs deleted files gets them by redoing the earlier steps. New check thresholds do not
+need them: the checks are judged again from the measures in `provenance.json`. A project processed before the
+measures were recorded gets them, from its recorded findings, with `python tools/record_measures.py PROJECT`.
 
 `storage.image_format` (`nrrd` or `nii.gz`) and `storage.transform_format` (`h5` or `tfm`) set the file formats.
 The defaults, compressed NRRD and HDF5, keep the values exactly and are small: the old single-folder layout took about 1 GB per

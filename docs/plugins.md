@@ -108,7 +108,12 @@ The same pattern works for the other interfaces. What to know:
 - **Sanity checks.** `check(self, case)` returns a list of `QCFinding(severity, code, message, value)`. `severity` is
   `"fail"` (fails the case), `"review"` (marks it Needs Review) or `"info"` (only records the value). Write
   `message` for a person, e.g. `"the femoral cartilage volume is 2.1 ml (usual: 4.0-20.0 ml)"`. List the parameters
-  that only `check()` reads in `check_params`, so changing them rechecks rather than recomputes.
+  that only `check()` reads in `check_params`, so changing them rechecks rather than recomputes. Better, split the
+  check in two, as the built-in stages do: `measure(self, case)` returns the numbers it looks at as a plain dict, and
+  `judge(self, measures)` turns them into findings with the `check_params`. A project keeps the measures in
+  `provenance.json`, so a new threshold rechecks the step from them alone, even after `retention: final` deleted its
+  outputs. Return `None` from `judge` when the measures cannot answer the current `check_params` (e.g. they count
+  vertices above a threshold that changed); the step is then rechecked from its outputs.
 - **Speed parameters** that do not change the results (e.g. how many patches go through a network at once) belong
   in `performance_params`, so changing them does not make outputs outdated.
 - **Intermediate outputs** worth keeping go in `MeshResult(mesh, intermediates={"name": value})`. A project saves

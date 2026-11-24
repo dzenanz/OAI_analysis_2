@@ -60,24 +60,29 @@ class OAIPreprocessor(Preprocessor):
         image = into_canonical_orientation(image, case.laterality == "right")  # simplifies mesh processing
         return window_intensities(image, self.window_min_percentile, self.window_max_percentile)
 
-    def check(self, case: CaseArtifacts) -> list[QCFinding]:
+    def measure(self, case: CaseArtifacts) -> dict:
         image = case.image
+        return {"axes": list(qc.axis_directions(image)), "atlas_axes": list(qc.axis_directions(case.atlas.image)),
+                "spacing_mm": [round(s, 3) for s in image.GetSpacing()],
+                "size": [int(s) for s in image.GetLargestPossibleRegion().GetSize()],
+                "median_intensity": float(np.median(itk.array_view_from_image(image)))}
+
+    def judge(self, measures: dict) -> list[QCFinding]:
         findings = []
-        axes, atlas_axes = qc.axis_directions(image), qc.axis_directions(case.atlas.image)
-        if axes != atlas_axes:
+        if measures["axes"] != measures["atlas_axes"]:
             findings.append(QCFinding("fail", "preprocess.orientation",
-                                      f"after reorientation, the image axes point along {axes}, but the atlas "
-                                      f"axes along {atlas_axes}"))
-        spacing = tuple(round(s, 3) for s in image.GetSpacing())
+                                      f"after reorientation, the image axes point along {tuple(measures['axes'])}, "
+                                      f"but the atlas axes along {tuple(measures['atlas_axes'])}"))
+        spacing = measures["spacing_mm"]
         unusual = any(abs(s - e) > 0.1 * e for s, e in zip(spacing, self.expected_spacing_mm))
         findings.append(qc.finding(unusual, "preprocess.spacing",
                                    f"the voxel spacing is {' x '.join(map(str, spacing))} mm (expected: "
                                    f"{' x '.join(map(str, self.expected_spacing_mm))})", max(spacing)))
-        size = tuple(int(s) for s in image.GetLargestPossibleRegion().GetSize())
-        findings.append(qc.finding(size != tuple(self.expected_size), "preprocess.size",
+        size = measures["size"]
+        findings.append(qc.finding(list(size) != list(self.expected_size), "preprocess.size",
                                    f"the image has {' x '.join(map(str, size))} voxels (expected: "
                                    f"{' x '.join(map(str, self.expected_size))})", np.prod(size)))
-        median = float(np.median(itk.array_view_from_image(image)))
+        median = measures["median_intensity"]
         findings.append(QCFinding("info", "preprocess.median_intensity",
                                   f"the median intensity after windowing is {median:.3f}", round(median, 6)))
         return findings

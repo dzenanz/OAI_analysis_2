@@ -50,10 +50,13 @@ class OAIPreprocessor(Preprocessor):
     """Mirror right knees to look like left ones, reorient to the atlas orientation, and window the intensities."""
 
     name: ClassVar[str] = "oai_default"
-    check_params: ClassVar[tuple[str, ...]] = ("expected_spacing_mm", "expected_size")
+    check_params: ClassVar[tuple[str, ...]] = ("expected_spacing_mm", "spacing_tolerance", "expected_size")
     window_min_percentile: float = 0.1  # intensities at or below this percentile become 0
     window_max_percentile: float = 99.9  # intensities at or above this percentile become 1
-    expected_spacing_mm: tuple[float, float, float] = (0.365, 0.365, 0.7)  # OAI sagittal 3D DESS; review if 10% off
+    expected_spacing_mm: tuple[float, float, float] = (0.365, 0.365, 0.7)  # OAI sagittal 3D DESS
+    # review a spacing further off than this share of the expected one. Some OAI 48M scans have a larger field of
+    # view, up to 0.51 x 0.51 x 0.97 mm, and segment well
+    spacing_tolerance: float = 0.5
     expected_size: tuple[int, int, int] = (384, 384, 160)  # voxels, OAI sagittal 3D DESS; review if different
 
     def run(self, image: itk.Image, case: CaseInfo) -> itk.Image:
@@ -74,7 +77,7 @@ class OAIPreprocessor(Preprocessor):
                                       f"after reorientation, the image axes point along {tuple(measures['axes'])}, "
                                       f"but the atlas axes along {tuple(measures['atlas_axes'])}"))
         spacing = measures["spacing_mm"]
-        unusual = any(abs(s - e) > 0.1 * e for s, e in zip(spacing, self.expected_spacing_mm))
+        unusual = any(abs(s - e) > self.spacing_tolerance * e for s, e in zip(spacing, self.expected_spacing_mm))
         findings.append(qc.finding(unusual, "preprocess.spacing",
                                    f"the voxel spacing is {' x '.join(map(str, spacing))} mm (expected: "
                                    f"{' x '.join(map(str, self.expected_spacing_mm))})", max(spacing)))

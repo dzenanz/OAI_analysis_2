@@ -4,20 +4,23 @@ Comparing a case with the other visits of the same knee (same patient_id and lat
 The stages' checks look at one case against fixed thresholds, which cannot tell a processing problem from the knee
 itself: a knee that has lost cartilage has little of it at every visit. A project therefore also compares each
 finished case with the knee's other finished visits:
-- A review flag that most of the knee's other visits also have is usual for this knee (e.g. cartilage loss). For
-  the values in knee_typical it no longer marks the case Needs Review, and is kept as a note instead.
-- A value that departs from the median of the knee's other visits by more than its departure limit marks the case
-  Needs Review, even within the fixed thresholds: either the processing went wrong or the knee changed.
+- A value that departs from the median of the knee's other visits by more than its departure limit, in the worse
+  direction, marks the case Needs Review, even within the fixed thresholds: either the processing went wrong or the
+  knee changed.
+- A review flag that most of the knee's other visits also have can be taken as usual for this knee (e.g. cartilage
+  loss): for the values in knee_typical it no longer marks the case Needs Review, and is kept as a note instead.
+  None are by default: in the full OAI run, such flags were mostly a processing failure repeated at every visit.
 Both need at least min_other_visits other finished visits. The settings are `longitudinal` in project.yaml.
 """
 import statistics
 
 from oai_analysis import qc
 
-# for each compared value, the direction that is worse ("higher", "lower", or "relative": a change either way, as a
-# share of the knee's median), and how to show it
+# for each compared value, the direction that is worse ("higher", "lower", or "lower_relative": lower, as a share of
+# the knee's median), and how to show it. A volume above the knee's median was not a problem in the full OAI run's
+# visual review; nearly all problems were below it
 MEASURES = {
-    "segment.volume": ("relative", lambda v: f"{v:.1f} ml"),
+    "segment.volume": ("lower_relative", lambda v: f"{v:.1f} ml"),
     "segment.pieces": ("higher", qc.percent),
     "segment.uncertainty": ("higher", lambda v: f"{v:.3f}"),
     "register.similarity": ("lower", lambda v: f"{v:.3f}"),
@@ -29,8 +32,10 @@ DEFAULTS = {
     # all visits), where about 95% of the visits stay within these. null switches one off
     "departure": {"segment.volume": 0.25, "segment.pieces": 0.05, "segment.uncertainty": 0.08,
                   "register.similarity": 0.08, "atlas_map.no_thickness": 0.1},
-    # values whose review flag is dropped when usual for the knee, because a knee's anatomy or disease explains them
-    "knee_typical": ["segment.volume", "segment.pieces", "atlas_map.no_thickness"],
+    # values whose review flag is dropped when usual for the knee, because a knee's anatomy or disease explains them.
+    # None by default: in the full OAI run (47857 cases), 40 of the 48 graded failures that ended up Succeeded had a
+    # flag dropped this way, nearly all a large area without thickness repeated at every visit
+    "knee_typical": [],
 }
 
 
@@ -83,7 +88,7 @@ def review(case_qc, other_visits_qc, cfg) -> tuple[dict[str, list[str]], list[st
         kind, show = MEASURES[code]
         median = statistics.median(values)
         change = finding["value"] - median
-        worse = {"higher": change, "lower": -change, "relative": abs(change) / median if median else 0}[kind]
+        worse = {"higher": change, "lower": -change, "lower_relative": -change / median if median else 0}[kind]
         if worse > limit:
             messages.setdefault(step, []).append(
                 f"{finding['message']}; this knee's other visits have {show(median)} (median), so this visit "

@@ -88,8 +88,10 @@ def test_preprocessor_check():
     atlas = Atlas(name="tiny", image=ball_image(), inner_mesh={}, embedding_2d={})
     case = CaseArtifacts(case=CaseInfo("knee.nrrd", "left"), atlas=atlas, image=image)
     findings = {f.code: f.severity for f in OAIPreprocessor().check(case)}
-    assert findings == {"preprocess.spacing": "review", "preprocess.size": "review",
+    assert findings == {"preprocess.spacing": "info", "preprocess.size": "review",  # 0.5 mm: within 50%
                         "preprocess.median_intensity": "info"}
+    strict = {f.code: f.severity for f in OAIPreprocessor(spacing_tolerance=0.1).check(case)}
+    assert strict["preprocess.spacing"] == "review"
     recorded = json.loads(json.dumps(OAIPreprocessor().measure(case)))
     assert OAIPreprocessor().judge(recorded) == OAIPreprocessor().check(case)
     image.SetDirection(itk.matrix_from_array(np.array([[0.0, 0, -1], [1, 0, 0], [0, 1, 0]])))

@@ -32,8 +32,8 @@ These are read by a project (`oai-analysis init` writes them to `project.yaml`),
 | `storage.image_format` | `nrrd` | `nrrd` or `nii.gz`. Both are compressed and about the same size; NIfTI stores the image position in single precision, so resuming from it can change results slightly. |
 | `storage.transform_format` | `h5` | `h5` (compressed, about 70 MB) or `tfm` (text, about 300 MB, readable). |
 | `longitudinal.min_other_visits` | `2` | How many other finished visits of the same knee a case needs to be compared with them (see [projects](projects.md#comparing-the-visits-of-a-knee)). |
-| `longitudinal.departure` | volume `0.25`, pieces `0.05`, uncertainty `0.08`, similarity `0.08`, no thickness `0.1` | How far a value may be from the median of the knee's other visits before the case needs review, by check code (`segment.volume` as a share of the median, either way). `null` switches one off. |
-| `longitudinal.knee_typical` | `segment.volume`, `segment.pieces`, `atlas_map.no_thickness` | The checks whose review flag is dropped when most of the knee's other visits have it too. |
+| `longitudinal.departure` | volume `0.25`, pieces `0.05`, uncertainty `0.08`, similarity `0.08`, no thickness `0.1` | How far a value may be from the median of the knee's other visits before the case needs review, by check code (`segment.volume` as a share of the median, lower only). `null` switches one off. |
+| `longitudinal.knee_typical` | none | The checks whose review flag is dropped when most of the knee's other visits have it too. In the full OAI run, such repeated flags were mostly a processing failure repeated at every visit, so none are by default. |
 
 ## Stages
 
@@ -54,7 +54,8 @@ Mirror right knees to look like left ones, reorient to the atlas orientation, an
 |---|---|---|
 | `window_min_percentile` | `0.1` | Intensities at or below this percentile become 0 |
 | `window_max_percentile` | `99.9` | Intensities at or above this percentile become 1 |
-| `expected_spacing_mm` | `[0.365, 0.365, 0.7]` | *check*. OAI sagittal 3D DESS; review if 10% off |
+| `expected_spacing_mm` | `[0.365, 0.365, 0.7]` | *check*. OAI sagittal 3D DESS |
+| `spacing_tolerance` | `0.5` | *check*. Review a spacing further off than this share of the expected one. Some OAI 48M scans have a larger field of view, up to 0.51 x 0.51 x 0.97 mm, and segment well |
 | `expected_size` | `[384, 384, 160]` | *check*. Voxels, OAI sagittal 3D DESS; review if different |
 
 ### `segmenter`: cartilage probability maps
@@ -68,8 +69,8 @@ The 3D U-Net trained on OAI knees, applied in overlapping patches.
 | Parameter | Default | Meaning |
 |---|---|---|
 | `overlap_size` | `[16, 16, 8]` | Voxels shared by neighbouring patches |
-| `fc_volume_ml` | `[4.0, 20.0]` | *check*. Usual range of the femoral cartilage volume |
-| `tc_volume_ml` | `[1.5, 8.0]` | *check*. Usual range of the tibial cartilage volume |
+| `fc_volume_ml` | `[4.5, 24.0]` | *check*. Usual range of the femoral cartilage volume |
+| `tc_volume_ml` | `[1.8, 10.0]` | *check*. Usual range of the tibial cartilage volume |
 | `max_outside_main_pieces` | `0.1` | *check*. Share of the volume outside the largest piece (FC) or two (TC) |
 | `max_uncertainty` | `0.3` | *check*. Mean of 1 - &#124;2p - 1&#124; over the cartilage |
 
@@ -87,8 +88,8 @@ The files are not part of the fingerprint: after they change, redo the step with
 | Parameter | Default | Meaning |
 |---|---|---|
 | `path` | `'{case_id}/{structure}_prob.nrrd'` | Template of each map's file, see above |
-| `fc_volume_ml` | `[4.0, 20.0]` | *check*. Usual range of the femoral cartilage volume |
-| `tc_volume_ml` | `[1.5, 8.0]` | *check*. Usual range of the tibial cartilage volume |
+| `fc_volume_ml` | `[4.5, 24.0]` | *check*. Usual range of the femoral cartilage volume |
+| `tc_volume_ml` | `[1.8, 10.0]` | *check*. Usual range of the tibial cartilage volume |
 | `max_outside_main_pieces` | `0.1` | *check*. Share of the volume outside the largest piece (FC) or two (TC) |
 | `max_uncertainty` | `0.3` | *check*. Mean of 1 - &#124;2p - 1&#124; over the cartilage |
 
@@ -104,7 +105,7 @@ uniGradICON, fine-tuned on each image pair.
 |---|---|---|
 | `finetune_steps` | `2` | Steps of fine-tuning the network on each image pair; 0: none |
 | `max_folding` | `0.01` | *check*. Fraction of the displacement field with a Jacobian determinant <= 0 |
-| `min_similarity` | `0.75` | *check*. Correlation of the warped image with the atlas image |
+| `min_similarity` | `0.7` | *check*. Correlation of the warped image with the atlas image; in the full OAI run, cases from 0.70 to 0.75 were fine |
 
 #### `gradicon_knee`
 
@@ -117,7 +118,7 @@ used before uniGradICON. finetune_steps: 0 uses the network as trained, as that 
 |---|---|---|
 | `finetune_steps` | `0` | Steps of fine-tuning the network on each image pair; 0: none |
 | `max_folding` | `0.01` | *check*. Fraction of the displacement field with a Jacobian determinant <= 0 |
-| `min_similarity` | `0.75` | *check*. Correlation of the warped image with the atlas image |
+| `min_similarity` | `0.7` | *check*. Correlation of the warped image with the atlas image; in the full OAI run, cases from 0.70 to 0.75 were fine |
 
 ### `mesh_generator`: cartilage surfaces
 

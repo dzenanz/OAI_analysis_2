@@ -122,7 +122,7 @@ def test_cli_config_dump(tmp_path, capsys):
     assert yaml.safe_load(capsys.readouterr().out)["pipeline"]["registerer"] == {"name": "unigradicon",
                                                                                   "finetune_steps": 5,
                                                                                   "max_folding": 0.01,
-                                                                                  "min_similarity": 0.75}
+                                                                                  "min_similarity": 0.70}
 
 
 def test_config_reference_is_current():

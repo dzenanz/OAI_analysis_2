@@ -19,9 +19,10 @@ class UNetSegmenter(Segmenter):
     check_params: ClassVar[tuple[str, ...]] = ("fc_volume_ml", "tc_volume_ml", "max_outside_main_pieces",
                                                "max_uncertainty")
     overlap_size: tuple[int, int, int] = (16, 16, 8)  # voxels shared by neighbouring patches
-    # checks, tuned on the benchmark cases and the Dec 18, 2024 triage
-    fc_volume_ml: tuple[float, float] = (4.0, 20.0)  # usual range of the femoral cartilage volume
-    tc_volume_ml: tuple[float, float] = (1.5, 8.0)  # usual range of the tibial cartilage volume
+    # checks, tuned on the benchmark cases and the Dec 18, 2024 triage; the volume ranges on a visual review of the
+    # full OAI run, where volumes below them were failures and above them were usable
+    fc_volume_ml: tuple[float, float] = (4.5, 24.0)  # usual range of the femoral cartilage volume
+    tc_volume_ml: tuple[float, float] = (1.8, 10.0)  # usual range of the tibial cartilage volume
     max_outside_main_pieces: float = 0.1  # share of the volume outside the largest piece (FC) or two (TC)
     max_uncertainty: float = 0.3  # mean of 1 - |2p - 1| over the cartilage
 

@@ -313,11 +313,19 @@ class Project:
                                 "cases": len(case_ids), "to_do": len(todo), "from_step": from_step,
                                 "workers": workers, "software": provenance.software()}) + "\n")
 
+        visits = {}  # knee -> its case ids
+        for case_id in self.cases:
+            visits.setdefault(self._knee(case_id) or case_id, []).append(case_id)
+        index_written = [time.monotonic()]
+
         def case_finished(case_id):
             statuses[case_id] = status = self.case_status(pipeline, case_id)
-            self._compare_visits(statuses.values())  # this visit can change how the knee's others compare
+            # this visit can change how the knee's others compare
+            self._compare_visits([statuses[c] for c in visits[self._knee(case_id) or case_id]])
             log.summary(_summary_line(status))
-            self.write_index(statuses.values())
+            if time.monotonic() - index_written[0] > 60:  # rewriting it after every case is slow in a large project
+                self.write_index(statuses.values())
+                index_written[0] = time.monotonic()
 
         try:
             # what the stages print, warnings included, goes to the full log
@@ -692,7 +700,8 @@ class _CaseRunner:
         self.folder.mkdir(parents=True, exist_ok=True)
         case = project.case_info(case_id)
         case_record = _read_json(self.folder / "case.json") or {}
-        if case_record.get("input") != str(case.input) or not case_record.get("input_sha256"):
+        # compared as paths: the same input reads /mnt/... on Linux and \mnt\... on Windows
+        if Path(case_record.get("input", "")) != Path(case.input) or not case_record.get("input_sha256"):
             progress(f"{case_id}: hashing the input")
             case_record = {**project.cases[case_id], "input": str(case.input),
                            "input_sha256": provenance.sha256_path(case.input)}

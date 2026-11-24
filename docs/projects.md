@@ -189,20 +189,22 @@ finish and marks it Needs Review. An *info* finding only records a measured valu
 | Step | Check | Default threshold |
 |---|---|---|
 | Preprocess | axes point the same way as the atlas' | fail otherwise |
-| | spacing and size are the OAI DESS ones | review if spacing is 10% off, or size differs |
+| | spacing and size are the OAI DESS ones | review if spacing is 50% off, or size differs |
 | | median intensity after windowing | info |
 | Segment | each structure is found | fail otherwise |
-| | volume | review outside 4–20 ml (FC), 1.5–8 ml (TC) |
+| | volume | review outside 4.5–24 ml (FC), 1.8–10 ml (TC) |
 | | share of the volume outside the largest piece (FC) or two pieces (TC) | review above 10% |
 | | the network's mean uncertainty over the cartilage | review above 0.3 |
 | Register | share of the transform that folds space | review above 1% |
-| | correlation of the warped image with the atlas | review below 0.75 |
+| | correlation of the warped image with the atlas | review below 0.70 |
 | Mesh | the surface is not empty | fail otherwise |
 | Thickness | share of the surface thicker than 6 mm | review above 1% |
 | Atlas map | share of the atlas surface without thickness | review above 15% |
 
 The thresholds were tuned on the regression benchmark cases and the cases a Dec 2024 manual review found to have
-problems: those problem cases are all flagged, and the clean ones are not. They are stage parameters, so each
+problems: those problem cases are all flagged, and the clean ones are not. The spacing, volume and similarity ones
+were then adjusted on a visual review of 457 cases of the full OAI run (47857 cases), picked on both sides of each
+threshold. They are stage parameters, so each
 project can change them in `project.yaml`.
 
 ### Comparing the visits of a knee
@@ -211,18 +213,19 @@ A fixed threshold cannot tell a processing problem from the knee itself: a knee 
 of it at every visit. So a project also compares each finished case with the other finished visits of the same knee
 (the same `patient_id` and `laterality` in `cases.csv`), when there are at least two:
 
-- **A flag the knee usually has is dropped**, for the volume, the pieces and the atlas surface without thickness.
-  E.g. a tibia with no thickness on 30% of the atlas surface at most visits has lost cartilage; the case is not
-  marked Needs Review for it, and the note goes to the `knee_typical` column of `index.parquet` instead. A poor
-  registration or an uncertain segmentation stays flagged, even at every visit.
 - **A visit that departs from the knee's other visits is flagged**, even within the fixed thresholds, e.g. a
   femoral cartilage volume of 6.5 ml in a knee with 12.7 ml at its other visits. Either the processing went wrong
-  or the knee changed; the note says which value and by how much.
+  or the knee changed; the note says which value and by how much. Only the worse direction counts: a volume above
+  the knee's median was not a problem in the full OAI run.
+- **A flag the knee usually has can be dropped**, for the checks listed in `knee_typical`: e.g. a tibia with no
+  thickness on 30% of the atlas surface at most visits may have lost cartilage. The case is then not marked Needs
+  Review for it, and the note goes to the `knee_typical` column of `index.parquet` instead. None are listed by
+  default: in the full OAI run, 40 of the 48 visually confirmed failures that ended up Succeeded had a flag dropped
+  this way, nearly all a large area without thickness repeated at every visit of the knee.
 
-On 148 knee visits (11 patients), this took 6 cases off Needs Review, all of them cartilage loss seen at every
-visit, and flagged 3 more. Two of those 3 disagree most with an earlier run of the 2019 pipeline, and no fixed
-threshold caught them. Finishing a visit can change how the knee's other visits compare, so their status can
-change too. The limits are the `longitudinal` setting (see the [config reference](config.md)).
+On 148 knee visits (11 patients), the comparison flagged 3 cases more. Two of those 3 disagree most with an
+earlier run of the 2019 pipeline, and no fixed threshold caught them. Finishing a visit can change how the knee's
+other visits compare, so their status can change too. The limits are the `longitudinal` setting (see the [config reference](config.md)).
 
 ## Reproducibility
 

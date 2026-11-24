@@ -33,6 +33,8 @@ def sha256_path(path) -> str:
     path = Path(path)
     if path.is_file():
         return sha256_file(path)
+    if not path.is_dir():  # not the hash of nothing
+        raise FileNotFoundError(f"{path} does not exist")
     digest = hashlib.sha256()
     for file in sorted(p for p in path.rglob("*") if p.is_file()):
         digest.update(file.relative_to(path).as_posix().encode())

@@ -461,7 +461,9 @@ def test_visits_of_a_knee_are_compared(tmp_path):
     itk.imwrite(ball_image(), str(tmp_path / "a.nrrd"))
     cases = [{"case_id": f"1_{m:02d}M_LEFT", "patient_id": "1", "month": m, "laterality": "left", "input": "a.nrrd"}
              for m in (0, 12, 24, 36)] + [{"case_id": "2_00M_LEFT", "laterality": "left", "input": "a.nrrd"}]
-    project = Project.create(tmp_path / "project", cases, {"workers": 0}, data_root=tmp_path)
+    longitudinal = {"knee_typical": ["atlas_map.no_thickness"]}  # none by default
+    project = Project.create(tmp_path / "project", cases, {"workers": 0, "longitudinal": longitudinal},
+                             data_root=tmp_path)
     pipeline = make_pipeline()
     project.run(pipeline=pipeline, echo=lambda text: None)
 
@@ -534,3 +536,8 @@ def test_container_provenance(monkeypatch):
     monkeypatch.delenv("OAI_ANALYSIS_IMAGE_DIGEST")
     if not Path("/.dockerenv").exists() and not Path("/run/.containerenv").exists():
         assert provenance.container() is None
+
+
+def test_a_missing_input_is_not_hashed(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        provenance.sha256_path(tmp_path / "missing")

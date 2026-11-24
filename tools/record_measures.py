@@ -2,20 +2,20 @@
 Add the measures of the checks to the provenance of a project processed before they were recorded, so that new
 thresholds recheck its cases from provenance.json alone instead of redoing the steps whose outputs retention:
 final deleted. The measures are read back from the QC findings recorded with each step. A record is changed only
-when judging its new measures with the project's thresholds gives exactly its recorded findings.
+when judging its new measures gives its recorded findings: the same codes with the same values, in the same order.
 
     python tools/record_measures.py PROJECT
 
-Run it while no `oai-analysis run` works on the project, before changing any threshold in project.yaml.
+Run it while no `oai-analysis run` works on the project.
 """
 import json
 import re
 import sys
 from collections import Counter
-from dataclasses import asdict
+from dataclasses import replace
 from pathlib import Path
 
-from oai_analysis.project import Project, _check_params, _write_json
+from oai_analysis.project import Project, _write_json
 
 STRUCTURES = {"femoral cartilage": "FC", "tibial cartilage": "TC"}
 
@@ -60,9 +60,6 @@ def main(path):
         step = steps.get(record.get("step"))
         if step is None or record.get("status") != "complete" or "measures" in record or "check_params" not in record:
             continue
-        if record["check_params"] != _check_params(step.stage):
-            outcome["skipped: thresholds differ from project.yaml"] += 1
-            continue
         try:
             measures = measures_from_qc(step.name, record)
         except (StopIteration, KeyError, TypeError) as e:
@@ -70,8 +67,10 @@ def main(path):
             continue
         if measures is None:
             continue
-        findings = step.stage.judge(measures)
-        if findings is None or [asdict(f) for f in findings] != record["qc"]:
+        # judged with the thresholds the findings were made with; the severities and messages can still differ (a
+        # threshold added since, a value rounded after the message was made), the codes and values cannot
+        findings = replace(step.stage, **record["check_params"]).judge(measures)
+        if findings is None or [(f.code, f.value) for f in findings] != [(f["code"], f["value"]) for f in record["qc"]]:
             outcome[f"skipped {step.name}: judging the measures does not give the recorded findings"] += 1
             print(f"  {file.parent}: recorded {record['qc']}, judged {findings}")
             continue

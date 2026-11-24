@@ -2,7 +2,7 @@ import pytest
 
 from oai_analysis import longitudinal
 
-CFG = longitudinal.settings(None)
+CFG = longitudinal.settings({"knee_typical": ["atlas_map.no_thickness"]})  # none by default
 
 
 def visit(no_thickness_tc, similarity=0.9, threshold=0.15):
@@ -40,6 +40,21 @@ def test_departure_from_the_knee():
     assert longitudinal.review(visit(0.02), [visit(0.13), visit(0.13)], CFG) == ({}, [])  # better is fine
     review, _ = longitudinal.review(visit(0.05, similarity=0.80), [visit(0.05)] * 2, CFG)  # lower is worse
     assert list(review) == ["register"]
+
+
+def test_volume_departs_only_downward():
+    def volume(ml):
+        return {"segment": [{"severity": "info", "code": "segment.volume", "message": f"{ml} ml", "value": ml}]}
+
+    review, _ = longitudinal.review(volume(7.0), [volume(10.0), volume(10.5), volume(9.8)], CFG)
+    assert list(review) == ["segment"]  # 30% less than the knee's median
+    assert longitudinal.review(volume(13.0), [volume(10.0), volume(10.5), volume(9.8)], CFG) == ({}, [])  # 30% more
+
+
+def test_no_flag_is_usual_for_the_knee_by_default():
+    review, typical = longitudinal.review(visit(0.30), [visit(0.32), visit(0.28), visit(0.05)],
+                                          longitudinal.settings(None))
+    assert review == {"atlas_map": ["no thickness on 30%"]} and typical == []
 
 
 def test_needs_enough_other_visits():

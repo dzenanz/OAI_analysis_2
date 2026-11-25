@@ -20,14 +20,16 @@ def segmentation_findings(measures: dict, fc_volume_ml, tc_volume_ml, max_outsid
             continue
         low, high = fc_volume_ml if structure == "FC" else tc_volume_ml
         findings.append(qc.finding(not low <= volume <= high, "segment.volume",
-                                   f"the {name} volume is {volume:.1f} ml (usual: {low}-{high} ml)", volume))
+                                   f"the {name} volume is {volume:.1f} ml (usual: {low}-{high} ml)", volume,
+                                   limit=low if volume < low else high))
         outside = m["outside_main_pieces"]
         pieces = "largest piece" if qc.EXPECTED_PIECES[structure] == 1 else "two largest pieces"
         findings.append(qc.finding(outside > max_outside_main_pieces, "segment.pieces",
                                    f"{qc.percent(outside)} of the {name} is outside its {pieces} "
-                                   f"(review above {qc.percent(max_outside_main_pieces)})", outside))
+                                   f"(review above {qc.percent(max_outside_main_pieces)})", outside,
+                                   limit=max_outside_main_pieces))
         uncertainty = m["uncertainty"]
         findings.append(qc.finding(uncertainty > max_uncertainty, "segment.uncertainty",
                                    f"the uncertainty about the {name} is {uncertainty:.3f} "
-                                   f"(review above {max_uncertainty})", uncertainty))
+                                   f"(review above {max_uncertainty})", uncertainty, limit=max_uncertainty))
     return findings

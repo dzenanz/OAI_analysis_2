@@ -11,6 +11,7 @@ M:/OAI_projects/pilot/
   project.yaml          settings: the pipeline config, data root, workers, retention, storage formats
   cases.csv             one row per case: case_id, patient_id, month, laterality, input
   index.parquet         one row per case: status, the step that failed, a note, the review flags, ...
+  needs_review.csv      the cases that need review, the worst first
   runs.jsonl            one line per `oai-analysis run`: when, the command, how many cases, the software versions
   logs/
     2026-10-29T130729.log           everything, including what the stages print
@@ -29,6 +30,9 @@ M:/OAI_projects/pilot/
   usually repeated because the first one had a problem. A warning names the series used and those skipped. The
   same happens if a case ID appears twice in an edited `cases.csv`.
 - `index.parquet` is rewritten after every case. Read it with `pandas.read_parquet` or DuckDB.
+- `needs_review.csv` is rewritten with it: the Needs Review cases, ordered by how far past its limit their worst
+  flag is (`times_over_limit`; see [Sanity checks](#sanity-checks)), with that flag in `note` and all of them in
+  `review`. Start a review at the top.
 
 ### A case's folder
 
@@ -199,13 +203,19 @@ finish and marks it Needs Review. An *info* finding only records a measured valu
 | | correlation of the warped image with the atlas | review below 0.70 |
 | Mesh | the surface is not empty | fail otherwise |
 | Thickness | share of the surface thicker than 6 mm | review above 1% |
-| Atlas map | share of the atlas surface without thickness | review above 15% |
+| Atlas map | share of the atlas surface without thickness | review above 20% |
 
 The thresholds were tuned on the regression benchmark cases and the cases a Dec 2024 manual review found to have
-problems: those problem cases are all flagged, and the clean ones are not. The spacing, volume and similarity ones
-were then adjusted on a visual review of 457 cases of the full OAI run (47857 cases), picked on both sides of each
-threshold. They are stage parameters, so each
-project can change them in `project.yaml`.
+problems: those problem cases are all flagged, and the clean ones are not. The spacing, volume, similarity and
+no-thickness ones were then adjusted on a visual review of 457 cases of the full OAI run (47857 cases), picked on
+both sides of each threshold, to flag fewer cases. They are stage parameters, so each project can change them in
+`project.yaml`.
+
+**How far past its limit a flag is** ranks the cases in `needs_review.csv`: the ratio of the value to the
+threshold it crossed, whichever way, e.g. 2 for twice the largest share without thickness, or for half the
+smallest volume. For a departure from the knee's other visits (below), it is the departure over its limit. Among the
+flagged cases of the visual review, a case graded a problem ranks above a case graded fine 89% of the time; counting
+the flags instead, 87%. A flag without a threshold (e.g. a spacing, or a plugin's flag) ranks last.
 
 ### Comparing the visits of a knee
 
@@ -222,6 +232,11 @@ of it at every visit. So a project also compares each finished case with the oth
   Review for it, and the note goes to the `knee_typical` column of `index.parquet` instead. None are listed by
   default: in the full OAI run, 40 of the 48 visually confirmed failures that ended up Succeeded had a flag dropped
   this way, nearly all a large area without thickness repeated at every visit of the knee.
+
+By default, a visit is flagged with a volume 35% below the median of the knee's other visits, 5 points more of it
+outside its main pieces, an uncertainty 0.11 higher, or 10 points more of the atlas surface without thickness. The
+similarity to the atlas is not compared: in the visual review of the full OAI run, most visits flagged for it were
+fine or had a minor problem.
 
 On 148 knee visits (11 patients), the comparison flagged 3 cases more. Two of those 3 disagree most with an
 earlier run of the 2019 pipeline, and no fixed threshold caught them. Finishing a visit can change how the knee's

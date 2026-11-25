@@ -27,12 +27,16 @@ knee up with the reference knee (`reg`), building the cartilage surface (`mesh`)
 carrying it onto the reference knee (`atlas`), and drawing the maps (`bio`). `✓` is done, `!` is where a check
 flagged something, `✗` is where it failed.
 
+**Where to start.** `needs_review.csv`, next to the project's `project.yaml`, lists the Needs Review cases with the
+worst first: those whose worst finding is furthest past its limit (`times_over_limit`: 2 means twice the allowed
+value, or half the smallest usual one). Work down from the top; the further down, the more often a case is fine.
+
 ## What *Needs Review* means
 
 The automatic checks look for signs that a result may be wrong. They do not decide that it *is* wrong: a flagged
 case can be fine, and that is what a reviewer decides. Each visit is also compared with the same knee's other
-visits: a finding the knee has at most visits (e.g. lost cartilage) does not flag it, and a visit unlike the others
-does. The note says what was found, for example:
+visits: a visit unlike the others is flagged too. The note says what was found, the worst finding first, for
+example:
 
 | Note | Usually means |
 |---|---|

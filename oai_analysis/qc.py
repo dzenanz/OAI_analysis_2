@@ -2,6 +2,8 @@
 Measurements for the sanity checks of the default stages (see Stage.check). Each takes what a stage produced and
 returns plain numbers; the stages compare them with their thresholds.
 """
+import math
+
 import itk
 import numpy as np
 import vtk
@@ -12,11 +14,26 @@ STRUCTURE_NAMES = {"FC": "femoral cartilage", "TC": "tibial cartilage"}
 EXPECTED_PIECES = {"FC": 1, "TC": 2}
 
 
-def finding(flagged: bool, code: str, message: str, value: float, severity="review"):
-    """A finding with the given severity when flagged, otherwise an "info" one that only records the value."""
+def finding(flagged: bool, code: str, message: str, value: float, severity="review", limit=None):
+    """
+    A finding with the given severity when flagged, otherwise an "info" one that only records the value. limit is
+    the threshold the value was judged against, if there is one.
+    """
     from oai_analysis.stages.base import QCFinding
 
-    return QCFinding(severity if flagged else "info", code, message, round(float(value), 6))
+    return QCFinding(severity if flagged else "info", code, message, round(float(value), 6),
+                     None if limit is None else round(float(limit), 6))
+
+
+def times_over_limit(finding: dict) -> float | None:
+    """
+    How far past its limit a flagged value is, as a ratio: 2 for twice the maximum or half the minimum. None for a
+    finding without a limit.
+    """
+    value, limit = finding.get("value"), finding.get("limit")
+    if value is None or not limit:
+        return None
+    return math.inf if value <= 0 else max(value / limit, limit / value)
 
 
 def percent(fraction) -> str:

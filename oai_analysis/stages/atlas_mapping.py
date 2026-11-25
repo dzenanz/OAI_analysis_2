@@ -19,8 +19,10 @@ class ClosestPointAtlasMapper(AtlasMapper):
     name: ClassVar[str] = "closest_point"
     check_params: ClassVar[tuple[str, ...]] = ("max_without_thickness",)
     # fraction of the atlas surface without thickness; above it, the case needs review. In the benchmark cases
-    # and the Dec 18, 2024 triage, the clean cases stay below 0.15 and most problem cases are above it
-    max_without_thickness: float = 0.15
+    # and the Dec 18, 2024 triage, the clean cases stay below 0.15 and most problem cases are above it. Raised to
+    # 0.2 to flag fewer of the full OAI run's 47857 cases; its visual review found 3 in 10 cases between 0.15 and 0.2
+    # fine or with a minor problem
+    max_without_thickness: float = 0.2
 
     def run(self, thickness_mesh, registration, atlas, structure):
         mesh_atlas = mp.transform_mesh(thickness_mesh, registration.phi_BA)
@@ -37,5 +39,6 @@ class ClosestPointAtlasMapper(AtlasMapper):
             findings.append(qc.finding(without > self.max_without_thickness, "atlas_map.no_thickness",
                                        f"the {qc.STRUCTURE_NAMES[structure]} has no thickness on "
                                        f"{qc.percent(without)} of the atlas surface "
-                                       f"(review above {qc.percent(self.max_without_thickness)})", without))
+                                       f"(review above {qc.percent(self.max_without_thickness)})", without,
+                                       limit=self.max_without_thickness))
         return findings

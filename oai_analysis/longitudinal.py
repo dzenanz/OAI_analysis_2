@@ -28,10 +28,12 @@ MEASURES = {
 }
 DEFAULTS = {
     "min_other_visits": 2,
-    # how far a value may be from the median of the knee's other visits; set by a run of 148 knees (11 patients,
-    # all visits), where about 95% of the visits stay within these. null switches one off
-    "departure": {"segment.volume": 0.25, "segment.pieces": 0.05, "segment.uncertainty": 0.08,
-                  "register.similarity": 0.08, "atlas_map.no_thickness": 0.1},
+    # how far a value may be from the median of the knee's other visits; null switches one off. Set by a run of
+    # 148 knees (11 patients, all visits), where about 95% of the visits stay within these, then loosened to flag
+    # fewer cases of the full OAI run: its visual review found about half of the visits with a smaller volume or
+    # uncertainty departure, or any similarity departure, fine or with a minor problem
+    "departure": {"segment.volume": 0.35, "segment.pieces": 0.05, "segment.uncertainty": 0.11,
+                  "register.similarity": None, "atlas_map.no_thickness": 0.1},
     # values whose review flag is dropped when usual for the knee, because a knee's anatomy or disease explains them.
     # None by default: in the full OAI run (47857 cases), 40 of the 48 graded failures that ended up Succeeded had a
     # flag dropped this way, nearly all a large area without thickness repeated at every visit
@@ -63,13 +65,14 @@ def _by_measure(case_qc) -> dict[tuple[str, str, int], dict]:
     return keyed
 
 
-def review(case_qc, other_visits_qc, cfg) -> tuple[dict[str, list[str]], list[str]]:
+def review(case_qc, other_visits_qc, cfg) -> tuple[dict[str, list[dict]], list[str]]:
     """
-    The review messages of a finished case by step, given its findings and those of the knee's other finished
-    visits ({step: [finding dicts]} each), and the notes of the flags dropped as usual for the knee.
+    The review flags of a finished case by step (finding dicts), given its findings and those of the knee's other
+    finished visits ({step: [finding dicts]} each), and the notes of the flags dropped as usual for the knee. A
+    departure from the other visits is a flag whose value is the departure and whose limit is its departure limit.
     """
     others = [_by_measure(o) for o in other_visits_qc]
-    messages, typical = {}, []
+    flags, typical = {}, []
     for (step, code, n), finding in _by_measure(case_qc).items():
         same = [o[(step, code, n)] for o in others if (step, code, n) in o]
         enough = len(same) >= cfg["min_other_visits"]
@@ -79,7 +82,7 @@ def review(case_qc, other_visits_qc, cfg) -> tuple[dict[str, list[str]], list[st
                 typical.append(f"{finding['message']}; most of this knee's other visits are the same, so it is "
                                f"likely the knee itself (e.g. cartilage loss), not a processing problem")
             else:
-                messages.setdefault(step, []).append(finding["message"])
+                flags.setdefault(step, []).append(finding)
             continue
         limit = cfg["departure"].get(code)
         values = [f["value"] for f in same if f.get("value") is not None]
@@ -90,7 +93,8 @@ def review(case_qc, other_visits_qc, cfg) -> tuple[dict[str, list[str]], list[st
         change = finding["value"] - median
         worse = {"higher": change, "lower": -change, "lower_relative": -change / median if median else 0}[kind]
         if worse > limit:
-            messages.setdefault(step, []).append(
-                f"{finding['message']}; this knee's other visits have {show(median)} (median), so this visit "
-                f"either has a processing problem or shows a real change")
-    return messages, typical
+            flags.setdefault(step, []).append({
+                "severity": "review", "code": code, "value": round(worse, 6), "limit": limit,
+                "message": f"{finding['message']}; this knee's other visits have {show(median)} (median), so this "
+                           f"visit either has a processing problem or shows a real change"})
+    return flags, typical

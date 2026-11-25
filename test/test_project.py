@@ -1,3 +1,4 @@
+import csv
 import json
 import textwrap
 from pathlib import Path
@@ -11,7 +12,7 @@ import pytest
 
 from oai_analysis import OAPipeline, io, parallel, provenance, qc
 from oai_analysis.atlas import Atlas
-from oai_analysis.project import Project, choose_series, read_manifest
+from oai_analysis.project import CHECKS_FORMAT, Project, choose_series, read_manifest
 from oai_analysis.stages import Preprocessor, QCFinding
 from test.test_stages import (
     ConstantThickness,
@@ -375,7 +376,8 @@ class CheckedThickness(ConstantThickness):
 
     def check(self, case):
         thickness = float(qc.point_values(case.thickness["FC"].mesh).max())
-        return [qc.finding(thickness > self.max_mm, "thickness.too_thick", f"FC is {thickness} mm thick", thickness)]
+        return [qc.finding(thickness > self.max_mm, "thickness.too_thick", f"FC is {thickness} mm thick", thickness,
+                           limit=self.max_mm)]
 
 
 @dataclass
@@ -416,7 +418,8 @@ def test_review_flags(project):
     assert result[0].note == "FC is 4.0 mm thick" and result[0].review == {"thickness": ["FC is 4.0 mm thick"]}
     record = provenance_of(project, "1_00M_LEFT", "05_thickness")
     assert record["qc"] == [{"severity": "review", "code": "thickness.too_thick", "message": "FC is 4.0 mm thick",
-                             "value": 4.0}]
+                             "value": 4.0, "limit": 3.0}]
+    assert result[0].times_over_limit == pytest.approx(4 / 3)
     assert record["check_params"] == {"max_mm": 3.0}
     assert len(project.select(project.status(pipeline), needs_review=True)) == 2
     before = started_times(project, "1_00M_LEFT")
@@ -456,6 +459,15 @@ def test_recheck_from_measures(project):
     record = provenance_of(project, "1_00M_LEFT", "05_thickness")
     assert record["qc"][0]["severity"] == "info" and record["check_params"] == {"max_mm": 5.0}
 
+    # findings recorded before their checks gave limits are checked again, from the measures alone
+    for path in project.path.glob("cases/*/*/*/provenance.json"):
+        old = json.loads(path.read_text())
+        old.pop("checks_format", None)
+        path.write_text(json.dumps(old))
+    result = project.run(pipeline=pipeline, workers=2, echo=lambda text: None)
+    assert [s.status for s in result] == ["Succeeded", "Succeeded"] and started() == before
+    assert provenance_of(project, "1_00M_LEFT", "05_thickness")["checks_format"] == CHECKS_FORMAT
+
 
 def test_visits_of_a_knee_are_compared(tmp_path):
     itk.imwrite(ball_image(), str(tmp_path / "a.nrrd"))
@@ -471,11 +483,11 @@ def test_visits_of_a_knee_are_compared(tmp_path):
         path = project.case_folder(case_id) / "06_atlas_map" / "provenance.json"
         record = json.loads(path.read_text())
         record["qc"] = [{"severity": "review" if v > 0.15 else "info", "code": "atlas_map.no_thickness",
-                         "message": f"{s} {v}", "value": v} for s, v in (("FC", fc), ("TC", tc))]
+                         "message": f"{s} {v}", "value": v, "limit": 0.15} for s, v in (("FC", fc), ("TC", tc))]
         path.write_text(json.dumps(record))
 
     for case_id, fc, tc in (("1_00M_LEFT", 0.20, 0.02), ("1_12M_LEFT", 0.22, 0.03), ("1_24M_LEFT", 0.21, 0.02),
-                            ("1_36M_LEFT", 0.21, 0.13), ("2_00M_LEFT", 0.20, 0.02)):
+                            ("1_36M_LEFT", 0.21, 0.13), ("2_00M_LEFT", 0.24, 0.02)):
         set_no_thickness(case_id, fc, tc)
     result = {s.case_id: s for s in project.status(pipeline)}
     assert result["1_00M_LEFT"].status == "Succeeded"  # FC flagged at every visit: usual for this knee
@@ -489,6 +501,10 @@ def test_visits_of_a_knee_are_compared(tmp_path):
     project.write_index(result.values())
     index = {row["case_id"]: row for row in pq.read_table(project.path / "index.parquet").to_pylist()}
     assert len(index["1_12M_LEFT"]["knee_typical"]) == 1 and len(index["1_36M_LEFT"]["review"]) == 1
+    # the worst first: 2_00M is 1.6 times over its limit (0.24 / 0.15), 1_36M departs 1.1 times its limit (0.11 / 0.1)
+    with open(project.path / "needs_review.csv", newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert [(r["case_id"], r["times_over_limit"]) for r in rows] == [("2_00M_LEFT", "1.6"), ("1_36M_LEFT", "1.1")]
 
 
 def test_fail_finding_fails_the_case(project):

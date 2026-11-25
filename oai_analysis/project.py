@@ -6,6 +6,7 @@ A project: a folder with the cases to process, the pipeline config, and every ca
       cases.csv        one row per case: case_id, patient_id, month, laterality, input
       runs.jsonl       one line per `oai-analysis run`
       index.parquet    one row per case: status, the step that failed, a note, the review flags
+      needs_review.csv the cases that need review, the worst first (see write_index)
       logs/            the full log and a plain-English summary of each run
       cases/9016304/96M_LEFT/
         case.json                 the input and its hash
@@ -38,7 +39,7 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
-from oai_analysis import config, io, longitudinal, provenance
+from oai_analysis import config, io, longitudinal, provenance, qc
 
 CASE_COLUMNS = ("case_id", "patient_id", "month", "laterality", "input")
 RETENTION = ("checkpoints", "all", "final")
@@ -57,6 +58,8 @@ DONE, STEP_FAILED, STEP_OUTDATED, MISSING = "done", "failed", "outdated", "missi
 
 HEARTBEAT_SECONDS = 60  # how often a running case updates its running.json
 RUNNING_TIMEOUT_SECONDS = 5 * 60  # a running.json older than this was left by a run that stopped
+# bump when the findings that checks record change form, so that `run` checks every step again (2: their limits)
+CHECKS_FORMAT = 2
 PROGRESS_EVERY_SECONDS = 5 * 60  # how often a long step logs that it is still working
 
 
@@ -75,6 +78,7 @@ class CaseStatus:
     last_run_s: float = 0.0  # of the steps that are done, run by the latest run that worked on the case
     finished: str | None = None  # when the last step finished
     review: dict[str, list[str]] = dataclasses.field(default_factory=dict)  # step -> messages of its review flags
+    times_over_limit: float | None = None  # how far past its limit the worst review flag is (see qc.times_over_limit)
     knee_typical: list[str] = dataclasses.field(default_factory=list)  # flags dropped as usual for the knee
     qc: dict[str, list[dict]] = dataclasses.field(default_factory=dict, repr=False)  # step -> findings, when finished
 
@@ -209,7 +213,7 @@ class Project:
             if (upstream_done and inputs is not None
                     and provenance.fingerprint(step.stage, inputs) == record["fingerprint"]):
                 states[step.name] = DONE
-                if record.get("check_params") != _check_params(step.stage):
+                if not _checked_now(step, record):
                     states[step.name] = STEP_OUTDATED
                     notes[step.name] = _what_changed_in_checks(step, record)
             else:
@@ -238,7 +242,7 @@ class Project:
             result.status, result.note = OUTDATED, notes[outdated[0]]
         elif all(state == DONE for state in states.values()):
             result.qc = {name: records[name].get("qc", []) for name in states}
-            _set_review(result, {name: [f["message"] for f in findings if f["severity"] == "review"]
+            _set_review(result, {name: [f for f in findings if f["severity"] == "review"]
                                  for name, findings in result.qc.items()})
         elif any(state == DONE for state in states.values()):
             missing = next(name for name, state in states.items() if state == MISSING)
@@ -271,11 +275,24 @@ class Project:
                          "laterality": row["laterality"], "status": s.status, "failed_step": s.failed_step,
                          "note": s.note, **{f"step_{name}": state for name, state in s.steps.items()},
                          "review": [message for messages in s.review.values() for message in messages],
-                         "knee_typical": s.knee_typical,
+                         "times_over_limit": s.times_over_limit, "knee_typical": s.knee_typical,
                          "duration_s": s.duration_s, "finished": s.finished})
         temporary = self.path / "index.parquet.tmp"
         pq.write_table(pa.Table.from_pylist(rows), temporary)
         os.replace(temporary, self.path / "index.parquet")
+        # the cases to look at, the worst first: by how far past its limit their worst flag is
+        review = sorted((r for r in rows if r["status"] == NEEDS_REVIEW), key=lambda r: -(r["times_over_limit"] or 0))
+        temporary = self.path / "needs_review.csv.tmp"
+        with open(temporary, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["case_id", "patient_id", "month", "laterality", "times_over_limit", "flags", "note",
+                             "review"])
+            for r in review:
+                times = r["times_over_limit"]
+                writer.writerow([r["case_id"], r["patient_id"], r["month"], r["laterality"],
+                                 "" if times is None else round(times, 2), len(r["review"]), r["note"],
+                                 "; ".join(r["review"])])
+        os.replace(temporary, self.path / "needs_review.csv")
 
     # running
 
@@ -540,6 +557,13 @@ def _check_params(stage) -> dict:
     return {name: params[name] for name in stage.check_params}
 
 
+def _checked_now(step, record) -> bool:
+    """Whether the step's findings come from its stage's current checks."""
+    # a stage without thresholds (check_params) has findings without limits, of any format
+    return (record.get("check_params") == _check_params(step.stage)
+            and (record.get("checks_format") == CHECKS_FORMAT or not step.stage.check_params))
+
+
 def _what_changed_in_checks(step, record) -> str:
     old = record.get("check_params")
     if old is None:
@@ -549,15 +573,17 @@ def _what_changed_in_checks(step, record) -> str:
     return "; ".join(changed or ["its checks changed"]) + "; run again to recheck"
 
 
-def _set_review(status, review):
-    """Set a finished case's status from its review messages by step."""
-    status.review = {name: messages for name, messages in review.items() if messages}
-    messages = [message for messages in status.review.values() for message in messages]
-    if messages:
-        status.status = NEEDS_REVIEW
-        status.note = messages[0] + (f" (and {len(messages) - 1} more)" if len(messages) > 1 else "")
+def _set_review(status, flags):
+    """Set a finished case's status from its review flags (finding dicts) by step; the note tells the worst one."""
+    status.review = {name: [f["message"] for f in findings] for name, findings in flags.items() if findings}
+    worst_first = sorted((f for findings in flags.values() for f in findings),
+                         key=lambda f: -(qc.times_over_limit(f) or 0))
+    if worst_first:
+        status.status, status.times_over_limit = NEEDS_REVIEW, qc.times_over_limit(worst_first[0])
+        others = len(worst_first) - 1
+        status.note = worst_first[0]["message"] + (f" (and {others} more)" if others else "")
     else:
-        status.status, status.note = SUCCEEDED, ""
+        status.status, status.note, status.times_over_limit = SUCCEEDED, "", None
 
 
 def _summary_line(status) -> str:
@@ -723,7 +749,7 @@ class _CaseRunner:
         if (step.name not in self.rerun and record is not None and record["status"] == "complete"
                 and inputs is not None and provenance.fingerprint(step.stage, inputs) == record["fingerprint"]):
             self.records[step.name] = record
-            if record.get("check_params") != _check_params(step.stage):
+            if not _checked_now(step, record):
                 self._recheck(step, record)
             return False
         return True
@@ -762,6 +788,7 @@ class _CaseRunner:
                 findings = step.stage.judge(measures)
         record["qc"] = [dataclasses.asdict(f) for f in findings]
         record["check_params"] = _check_params(step.stage)
+        record["checks_format"] = CHECKS_FORMAT
         failures = [f.message for f in findings if f.severity == "fail"]
         if failures:
             record.update(status="failed", error="; ".join(failures))

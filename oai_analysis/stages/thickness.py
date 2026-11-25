@@ -33,7 +33,8 @@ def thickness_findings(measures, max_thickness_mm, max_too_thick) -> list[QCFind
         findings.append(qc.finding(too_thick > max_too_thick, "thickness.too_thick",
                                    f"the {qc.STRUCTURE_NAMES[structure]} is thicker than {max_thickness_mm} mm "
                                    f"on {qc.percent(too_thick)} of its surface "
-                                   f"(review above {qc.percent(max_too_thick)})", too_thick))
+                                   f"(review above {qc.percent(max_too_thick)})", too_thick,
+                                   limit=max_too_thick))
     return findings
 
 

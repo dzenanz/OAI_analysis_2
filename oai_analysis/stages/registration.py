@@ -88,8 +88,8 @@ def registration_findings(measures: dict, max_folding, min_similarity) -> list[Q
     return [
         qc.finding(folding > max_folding, "register.folding",
                    f"the registration folds space in {qc.percent(folding)} of its field "
-                   f"(review above {qc.percent(max_folding)})", folding),
+                   f"(review above {qc.percent(max_folding)})", folding, limit=max_folding),
         qc.finding(similarity < min_similarity, "register.similarity",
                    f"after registration, the image correlates with the atlas at {similarity:.3f} "
-                   f"(review below {min_similarity})", similarity),
+                   f"(review below {min_similarity})", similarity, limit=min_similarity),
     ]

@@ -32,7 +32,7 @@ These are read by a project (`oai-analysis init` writes them to `project.yaml`),
 | `storage.image_format` | `nrrd` | `nrrd` or `nii.gz`. Both are compressed and about the same size; NIfTI stores the image position in single precision, so resuming from it can change results slightly. |
 | `storage.transform_format` | `h5` | `h5` (compressed, about 70 MB) or `tfm` (text, about 300 MB, readable). |
 | `longitudinal.min_other_visits` | `2` | How many other finished visits of the same knee a case needs to be compared with them (see [projects](projects.md#comparing-the-visits-of-a-knee)). |
-| `longitudinal.departure` | volume `0.25`, pieces `0.05`, uncertainty `0.08`, similarity `0.08`, no thickness `0.1` | How far a value may be from the median of the knee's other visits before the case needs review, by check code (`segment.volume` as a share of the median, lower only). `null` switches one off. |
+| `longitudinal.departure` | volume `0.35`, pieces `0.05`, uncertainty `0.11`, similarity off, no thickness `0.1` | How far a value may be from the median of the knee's other visits before the case needs review, by check code (`segment.volume` as a share of the median, lower only). `null` switches one off. |
 | `longitudinal.knee_typical` | none | The checks whose review flag is dropped when most of the knee's other visits have it too. In the full OAI run, such repeated flags were mostly a processing failure repeated at every visit, so none are by default. |
 
 ## Stages
@@ -186,7 +186,7 @@ Move the patient mesh into atlas space and give each atlas vertex the thickness 
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `max_without_thickness` | `0.15` | *check*. Fraction of the atlas surface without thickness; above it, the case needs review. In the benchmark cases and the Dec 18, 2024 triage, the clean cases stay below 0.15 and most problem cases are above it |
+| `max_without_thickness` | `0.2` | *check*. Fraction of the atlas surface without thickness; above it, the case needs review. In the benchmark cases and the Dec 18, 2024 triage, the clean cases stay below 0.15 and most problem cases are above it. Raised to 0.2 to flag fewer of the full OAI run's 47857 cases; its visual review found 3 in 10 cases between 0.15 and 0.2 fine or with a minor problem |
 
 ### `biomarker_extractors`: results computed from everything above (a list)
 

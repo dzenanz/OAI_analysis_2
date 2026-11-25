@@ -21,6 +21,7 @@ def into_canonical_orientation(image, flip_left_right):
     if hasattr(itk, "AnatomicalOrientation"):  # ITK 6 takes an AnatomicalOrientation, not the enum
         dicom_pir = itk.AnatomicalOrientation(dicom_pir)
     if flip_left_right:
+        image = itk.image_duplicator(image)  # leaves the caller's image as it is
         image_dir = itk.array_from_matrix(image.GetDirection())
         image_dir[0, :] *= -1  # flip left-right
         image.SetDirection(itk.matrix_from_array(image_dir))
@@ -84,7 +85,8 @@ class OAIPreprocessor(Preprocessor):
         size = measures["size"]
         findings.append(qc.finding(list(size) != list(self.expected_size), "preprocess.size",
                                    f"the image has {' x '.join(map(str, size))} voxels (expected: "
-                                   f"{' x '.join(map(str, self.expected_size))})", np.prod(size)))
+                                   f"{' x '.join(map(str, self.expected_size))})", np.prod(size),
+                                   limit=np.prod(self.expected_size)))
         median = measures["median_intensity"]
         findings.append(QCFinding("info", "preprocess.median_intensity",
                                   f"the median intensity after windowing is {median:.3f}", round(median, 6)))

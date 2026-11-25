@@ -68,6 +68,7 @@ def test_preprocessor(laterality):
     assert preprocessor.result_params() == {"window_min_percentile": 0.1, "window_max_percentile": 99.9}
 
     result = preprocessor.run(image, CaseInfo("x.nii.gz", laterality))
+    np.testing.assert_array_equal(itk.array_from_matrix(image.GetDirection()), np.eye(3))  # the input is unchanged
 
     asl = itk.SpatialOrientationEnums.ValidCoordinateOrientations_ITK_COORDINATE_ORIENTATION_ASL
     if hasattr(itk, "AnatomicalOrientation"):  # ITK 6

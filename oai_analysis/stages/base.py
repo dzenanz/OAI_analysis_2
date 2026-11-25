@@ -101,6 +101,7 @@ class QCFinding:
     code: str  # for programs, e.g. "thickness.too_thick"
     message: str  # plain English, for people
     value: float | None = None
+    limit: float | None = None  # the threshold the value was judged against; ranks how far past it a flag is
 
 
 @dataclass

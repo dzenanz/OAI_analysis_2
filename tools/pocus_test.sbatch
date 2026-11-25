@@ -1,24 +1,24 @@
 #!/bin/bash
 # A run of oai-analysis on POCUS: the entire machine (4 GPUs, 12/24 CPU threads).
-# All 48067 cases take about 4.5 days and keep about 6 MB each; a resubmitted job resumes where it stopped.
-# Submit with `sbatch pocus_test.sbatch`; follow with `tail -f oai-full-JOBID.out`.
-#SBATCH --job-name=oai-full
+# All 48067 cases take about 4.5 days and keep about 30 MB each (the default retention in project.yaml: the input
+# image, the atlas-mapped meshes, the biomarkers); a resubmitted job resumes where it stopped.
+# Submit with `sbatch pocus_test.sbatch`; follow with `tail -f oai-fullN4-JOBID.out`.
+#SBATCH --job-name=oai-fullN4
 #SBATCH --nodelist=pocus
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=24
 #SBATCH --mem=96G
 #SBATCH --time=10-00:00:00
-#SBATCH --output=oai-full-%j.out
+#SBATCH --output=oai-fullN4-%j.out
 
 set -euo pipefail
 
 # --- edit these ---
 ENV=/data/users/dzenan.zukic/oai/.venv            # the virtual environment with oai-analysis installed
-PROJECT=/data/users/dzenan.zukic/oai/full         # created on the first run, resumed on the next ones
+PROJECT=/data/users/dzenan.zukic/oai/fullN4       # created on the first run, resumed on the next ones
 MANIFEST=/data/users/dzenan.zukic/oai/OAI_analysis_2/oai-analysis-test-data/study_uid_to_vol_path.csv
 DATA_ROOT=/mnt/oai/OAI                            # the folder the manifest's paths are relative to
 PATIENTS=                                         # comma-separated IDs, e.g. 9000099,9000296; empty: all
-RETENTION=final                                   # final: keep only the atlas-mapped meshes, biomarkers, provenance
 # ------------------
 
 source "$ENV/bin/activate"
@@ -30,8 +30,7 @@ python -c "import torch, itk, oai_analysis; print('torch', torch.__version__, 'C
 torch.cuda.device_count(), 'GPUs; ITK', itk.Version.GetITKVersion())"
 
 if [ ! -f "$PROJECT/project.yaml" ]; then
-    oai-analysis init "$PROJECT" --manifest "$MANIFEST" --data-root "$DATA_ROOT" --patients "$PATIENTS" \
-        --config <(echo "retention: $RETENTION")
+    oai-analysis init "$PROJECT" --manifest "$MANIFEST" --data-root "$DATA_ROOT" --patients "$PATIENTS"
 fi
 
 # GPU use every 5 s, to see whether the GPUs stay busy

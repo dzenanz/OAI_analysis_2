@@ -11,6 +11,7 @@ A project: a folder with the cases to process, the pipeline config, and every ca
       cases/9016304/96M_LEFT/
         case.json                 the input and its hash
         thumbnails/               small pictures to look at: the segmentation, the 2D thickness maps
+        00_input/                 input.nrrd: the input image as read (see DEFAULT_RETENTION)
         01_preprocess/            image.nrrd, provenance.json
         ...
         07_biomarkers/thickness_map_2d/
@@ -42,12 +43,16 @@ from pathlib import Path
 from oai_analysis import config, io, longitudinal, provenance, qc
 
 CASE_COLUMNS = ("case_id", "patient_id", "month", "laterality", "input")
-RETENTION = ("checkpoints", "all", "final")
+# what each step keeps once its case finishes: keep_all its outputs and intermediates (e.g. FC_inner.vtk), keep its
+# outputs, delete them (a later step that needs them gets them by running the step again). The provenance is always
+# kept. input: keep saves the input image, as read, in compressed NRRD
+RETENTION = ("keep_all", "keep", "delete")
+DEFAULT_RETENTION = {"input": "keep", "preprocess": "delete", "segment": "delete", "register": "delete",
+                     "mesh": "delete", "thickness": "delete", "atlas_map": "keep", "biomarkers": "keep"}
 IMAGE_FORMATS = ("nrrd", "nii.gz")
 TRANSFORM_FORMATS = ("h5", "tfm")
-DEFAULT_SETTINGS = {"data_root": None, "retention": "checkpoints", "workers": "auto",
+DEFAULT_SETTINGS = {"data_root": None, "retention": DEFAULT_RETENTION, "workers": "auto",
                     "storage": {"image_format": "nrrd", "transform_format": "h5"}, "longitudinal": None}
-KEPT_BY_FINAL = ("atlas_map", "biomarkers/")  # steps whose files retention: final keeps
 
 # case statuses, in plain language
 SUCCEEDED, NEEDS_REVIEW, FAILED, OUTDATED, INCOMPLETE, NOT_STARTED, RUNNING = (
@@ -90,8 +95,10 @@ class Project:
             raise FileNotFoundError(f"{self.path} is not a project: it has no project.yaml (see `oai-analysis init`)")
         self.settings = {**DEFAULT_SETTINGS, **config.load(self.path / "project.yaml")}
         config.check_keys(self.settings)
-        if self.settings["retention"] not in RETENTION:
-            raise ValueError(f"retention must be one of {RETENTION}, not {self.settings['retention']!r}")
+        self.retention = {**DEFAULT_RETENTION, **(self.settings["retention"] or {})}
+        if self.retention.keys() != DEFAULT_RETENTION.keys() or not set(self.retention.values()) <= set(RETENTION):
+            raise ValueError(f"retention takes the steps {tuple(DEFAULT_RETENTION)}, each one of {RETENTION}, "
+                             f"not {self.settings['retention']!r}")
         storage = {**DEFAULT_SETTINGS["storage"], **(self.settings.get("storage") or {})}
         if storage["image_format"] not in IMAGE_FORMATS or storage["transform_format"] not in TRANSFORM_FORMATS:
             raise ValueError(f"storage formats must be image_format: {IMAGE_FORMATS}, "
@@ -106,11 +113,12 @@ class Project:
     # creating a project
 
     @classmethod
-    def create(cls, path, cases=(), pipeline_config=None, data_root=None, retention="checkpoints") -> "Project":
+    def create(cls, path, cases=(), pipeline_config=None, data_root=None, retention=None) -> "Project":
         """
         Create a project folder. cases are dicts with the CASE_COLUMNS; inputs are relative to data_root
         (or to the project folder) unless absolute. A case listed more than once gets one input (see
-        choose_series). pipeline_config is a config dict or YAML file (see config.py).
+        choose_series). pipeline_config is a config dict or YAML file (see config.py). retention changes what
+        steps keep (see DEFAULT_RETENTION).
         """
         from oai_analysis.pipeline import OAPipeline
 
@@ -122,7 +130,7 @@ class Project:
             **OAPipeline.from_config(cfg).config(),  # the full config, so every default is written down
             "data_root": str(data_root) if data_root is not None else cfg.get("data_root"),
             "workers": cfg.get("workers", DEFAULT_SETTINGS["workers"]),
-            "retention": cfg.get("retention", retention),
+            "retention": {**DEFAULT_RETENTION, **(cfg.get("retention") or {}), **(retention or {})},
             "storage": {**DEFAULT_SETTINGS["storage"], **(cfg.get("storage") or {})},
             "longitudinal": longitudinal.settings(cfg.get("longitudinal")),
         }
@@ -421,10 +429,13 @@ class Project:
             saved[name] = {"path": filename, "sha256": provenance.sha256_file(path)}
         return saved
 
+    def retention_of(self, step) -> str:
+        return self.retention[step.name.split("/")[0]]  # one setting for all the biomarkers
+
     def _prune(self, steps, folder):
-        """retention: final keeps only the atlas-mapped meshes, the biomarkers and the provenance."""
+        """Delete the outputs of the steps whose retention is delete, but not their provenance."""
         for step in steps:
-            if step.name.startswith(KEPT_BY_FINAL):
+            if self.retention_of(step) != "delete":
                 continue
             for path in (folder / step.folder).iterdir():
                 if path.name != "provenance.json":
@@ -853,8 +864,11 @@ class _CaseRunner:
         if not isinstance(outcome, Exception):
             try:
                 record["outputs"] = self.project._save(step, outcome.outputs, step_folder)
-                if self.project.settings["retention"] == "all":
+                if self.project.retention_of(step) == "keep_all":
                     record["intermediates"] = self.project._save(step, outcome.intermediates, step_folder)
+                if step.name == "preprocess" and self.project.retention["input"] == "keep":
+                    (self.folder / "00_input").mkdir(exist_ok=True)
+                    io.write(self.result.input_image, self.folder / "00_input" / "input.nrrd", compression=True)
                 record["status"] = "complete"
                 if self.checks:
                     self._check(step, record)
@@ -875,7 +889,7 @@ class _CaseRunner:
         return True
 
     def finish(self):
-        if not self.failed and self.project.settings["retention"] == "final":
+        if not self.failed:
             self.project._prune(self.steps.values(), self.folder)
         self.heartbeat.remove(self.case_id)
         self.result = None  # free the memory before the next case

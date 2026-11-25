@@ -55,7 +55,7 @@ These are read by a project (`oai-analysis init` writes them to `project.yaml`),
 |---|---|---|
 | `data_root` | none | The folder that the `input` paths in `cases.csv` are relative to, e.g. `O:/OAI`. |
 | `workers` | `auto` | CPU worker processes, which preprocess the cases and do the steps after registration, while one process per GPU segments and registers them (see [projects](projects.md#parallel-runs)). `auto`: one per two CPUs, less one per GPU, at most one per case. `0` runs everything in the `run` process, one case after another. `run --workers N` overrides it. |
-| `retention` | `checkpoints` | What is kept on disk. `checkpoints`: each step's outputs, enough to resume from any step. `all`: also the stages' intermediate outputs (e.g. `FC_inner.vtk`). `final`: once a case finishes, only the atlas-mapped meshes, the biomarkers and the provenance. |
+| `retention` | `input`, `atlas_map`, `biomarkers`: `keep`; the other steps: `delete` | What each step keeps once its case finishes: `keep` its outputs, `keep_all` also the stage's intermediate outputs (e.g. `FC_inner.vtk`), `delete` only its `provenance.json`. `biomarkers` sets all the biomarker extractors; `input: keep` saves the input image (see [projects](projects.md#retention-and-storage)). |
 | `storage.image_format` | `nrrd` | `nrrd` or `nii.gz`. Both are compressed and about the same size; NIfTI stores the image position in single precision, so resuming from it can change results slightly. |
 | `storage.transform_format` | `h5` | `h5` (compressed, about 70 MB) or `tfm` (text, about 300 MB, readable). |
 | `longitudinal.min_other_visits` | `2` | How many other finished visits of the same knee a case needs to be compared with them (see [projects](projects.md#comparing-the-visits-of-a-knee)). |

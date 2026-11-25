@@ -1,7 +1,7 @@
 """
 Add the measures of the checks to the provenance of a project processed before they were recorded, so that new
-thresholds recheck its cases from provenance.json alone instead of redoing the steps whose outputs retention:
-final deleted. The measures are read back from the QC findings recorded with each step. A record is changed only
+thresholds recheck its cases from provenance.json alone instead of redoing the steps whose outputs retention
+deleted. The measures are read back from the QC findings recorded with each step. A record is changed only
 when judging its new measures gives its recorded findings: the same codes with the same values, in the same order.
 
     python tools/record_measures.py PROJECT

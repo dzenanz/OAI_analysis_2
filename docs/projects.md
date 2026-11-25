@@ -263,15 +263,32 @@ Both settings, and the container image when run in one (see [Docker](install.md#
 
 ## Retention and storage
 
-`retention` in `project.yaml` sets what is kept:
+`retention` in `project.yaml` sets what each step keeps once its case finishes:
 
-| Value | Kept | Size per case |
-|---|---|---|
-| `checkpoints` (default) | each step's outputs: enough to resume or redo from any step | about 330 MB |
-| `all` | also the stages' intermediate outputs (e.g. `FC_inner.vtk`, the surfaces moved into atlas space) | about 340 MB |
-| `final` | once a case finishes: the atlas-mapped surfaces, the biomarkers, the thumbnails and every `provenance.json` | about 10 MB |
+| Value | Kept |
+|---|---|
+| `keep` | the step's outputs: enough to resume or redo from the step after it |
+| `keep_all` | also the stage's intermediate outputs (e.g. `FC_inner.vtk`, the surfaces moved into atlas space) |
+| `delete` | only `provenance.json` |
 
-With `final`, a step that needs deleted files gets them by redoing the earlier steps. New check thresholds do not
+The defaults keep the input image, the atlas-mapped surfaces and the biomarkers, along with the thumbnails and
+every `provenance.json`: about 30 MB per OAI case, 25 MB of it the input. Keeping every step's outputs takes about
+330 MB.
+
+```yaml
+retention:
+  input: keep          # the input image as read, in compressed NRRD: 00_input/input.nrrd
+  preprocess: delete
+  segment: delete
+  register: delete
+  mesh: delete
+  thickness: delete
+  atlas_map: keep
+  biomarkers: keep     # all the biomarker extractors
+```
+
+`input` takes `keep` or `delete`; the input is saved when preprocessing runs, in the pixel type of the file. A
+failed case keeps every output, to look at. A step that needs deleted files gets them by redoing the earlier steps. New check thresholds do not
 need them: the checks are judged again from the measures in `provenance.json`. A project processed before the
 measures were recorded gets them, from its recorded findings, with `python tools/record_measures.py PROJECT`.
 

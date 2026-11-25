@@ -77,8 +77,8 @@ class Stage(ABC):
     def measure(self, case: CaseArtifacts) -> dict | None:
         """
         The numbers the checks look at, as plain JSON values. A project keeps them in provenance.json, so that new
-        thresholds (check_params) recheck the step with judge() alone, without its outputs, which retention: final
-        deletes. Default: None, for a stage whose check() looks at its outputs itself.
+        thresholds (check_params) recheck the step with judge() alone, without its outputs, which retention may
+        delete. Default: None, for a stage whose check() looks at its outputs itself.
         """
         return None
 
@@ -173,6 +173,7 @@ class CaseArtifacts:
     """Everything produced for one case so far, keyed by structure where it applies."""
     case: CaseInfo
     atlas: Atlas
+    input_image: itk.Image | None = None  # as read, before preprocessing
     image: itk.Image | None = None  # preprocessed
     probability: dict[str, itk.Image] = field(default_factory=dict)
     registration: RegistrationResult | None = None

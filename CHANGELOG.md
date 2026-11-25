@@ -65,9 +65,10 @@ previous version (`f198a2f`).
   `run --workers N` sets the number of CPU worker processes. The U-Net segments one patch at a time
   (its `batch_size` parameter, 4, is gone): as fast, with a third of the GPU memory. See
   [parallel runs](docs/projects.md#parallel-runs).
-- **Storage.** A project case takes about 330 MB (340 MB with every intermediate output) instead of 1050 MB:
-  compressed NRRD images and HDF5 transforms instead of uncompressed NRRD and 300 MB text transforms.
-  `retention: final` keeps about 10 MB per case. The single-image command writes the same files as before.
+- **Storage.** A project case takes about 330 MB with every step's outputs (340 MB with every intermediate output)
+  instead of 1050 MB: compressed NRRD images and HDF5 transforms instead of uncompressed NRRD and 300 MB text
+  transforms. `retention` sets what each step keeps; by default, the input image, the atlas-mapped surfaces and the
+  biomarkers: about 30 MB per case. The single-image command writes the same files as before.
 - **Sanity checks** on every default stage, with thresholds as stage parameters; thumbnails per case.
 - **Kept working:** `oai-analysis IMAGE OUT left|right` and `pipeline_cli.py` (what knee-sarg runs), and
   `analysis_pipeline()`, with the same output file names.

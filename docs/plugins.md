@@ -52,7 +52,7 @@ class MeanThickness(BiomarkerExtractor):
   existing outputs are recomputed.
 - `run()` returns file names and values. Values can be bytes, numpy arrays (`.npy`), ITK images or VTK meshes. In a
   project they go to `07_biomarkers/mean_thickness/`, with a `provenance.json`.
-- `requires` lists the steps whose outputs `run()` reads. With `retention: final`, adding the extractor then reruns
+- `requires` lists the steps whose outputs `run()` reads. When the other steps' outputs were deleted (see `retention`), adding the extractor reruns
   only what it needs, not the whole case.
 
 `CaseArtifacts` holds everything produced for the case: `case` (the `CaseInfo`), `atlas`, `image`,
@@ -111,13 +111,13 @@ The same pattern works for the other interfaces. What to know:
   that only `check()` reads in `check_params`, so changing them rechecks rather than recomputes. Better, split the
   check in two, as the built-in stages do: `measure(self, case)` returns the numbers it looks at as a plain dict, and
   `judge(self, measures)` turns them into findings with the `check_params`. A project keeps the measures in
-  `provenance.json`, so a new threshold rechecks the step from them alone, even after `retention: final` deleted its
+  `provenance.json`, so a new threshold rechecks the step from them alone, even after `retention` deleted its
   outputs. Return `None` from `judge` when the measures cannot answer the current `check_params` (e.g. they count
   vertices above a threshold that changed); the step is then rechecked from its outputs.
 - **Speed parameters** that do not change the results (e.g. how many patches go through a network at once) belong
   in `performance_params`, so changing them does not make outputs outdated.
 - **Intermediate outputs** worth keeping go in `MeshResult(mesh, intermediates={"name": value})`. A project saves
-  them with `retention: all`.
+  them when the step's `retention` is `keep_all`.
 - A **segmenter** gets the case as well as the image, e.g. to find files by `case.case_id` or by the `cases.csv`
   columns in `case.details` (see `PrecomputedSegmenter`).
 

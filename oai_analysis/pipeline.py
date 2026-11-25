@@ -11,6 +11,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 
+import itk
 import numpy as np
 import torch
 
@@ -199,10 +200,12 @@ class OAPipeline:
         case = result.case
         match step.name:
             case "preprocess":
-                image = io.read_image(case.input)
-                description = io.series_description(case.input, image)
+                result.input_image = itk.imread(case.input)  # in its own pixel type: a project may save it
+                description = io.series_description(case.input, result.input_image)
                 if description is not None:
                     print(f"Laterality: {case.laterality}, Series description: {description}")
+                image = itk.cast_image_filter(result.input_image,
+                                              ttype=(type(result.input_image), itk.Image[itk.F, 3]))
                 result.image = self.preprocessor.run(image, case)
                 return StepOutputs({"image": result.image})
             case "segment":

@@ -102,7 +102,7 @@ it.
 | use another stage or parameter | `project.yaml`; see the [config reference](config.md) |
 | add a result computed for each case | a biomarker extractor; see [writing a plugin](plugins.md) |
 | change a sanity-check threshold | the stage's parameter in `project.yaml`; `run` rechecks without recomputing |
-| keep less on disk | `retention: final` in `project.yaml` |
+| keep more or less on disk | `retention` in `project.yaml`, per step |
 
 Orchestrators (knee-sarg's Dagster, SLURM scripts) should call `oai-analysis run` or `Project.run()` on a list of
 cases, rather than one process per image, so the networks are loaded once per GPU and the cases run in parallel.

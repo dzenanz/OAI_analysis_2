@@ -58,8 +58,9 @@ for s in project.status():                    # like `oai-analysis status`
 flagged = project.select(project.status(), needs_review=True)
 ```
 
-- `Project.create(path, cases, pipeline_config=None, data_root=None, retention="checkpoints")` starts a project
-  from a list of `cases.csv` rows (dicts with `case_id, patient_id, month, laterality, input`).
+- `Project.create(path, cases, pipeline_config=None, data_root=None, retention=None)` starts a project
+  from a list of `cases.csv` rows (dicts with `case_id, patient_id, month, laterality, input`). `retention` changes
+  what steps keep, e.g. `{"segment": "keep"}`.
 - `run(case_ids=None, from_step=None, pipeline=None, workers=None)`: `pipeline` replaces the one built from
   `project.yaml`, e.g. to add a stage that is not registered; it is sent to the worker processes, so its stages
   must be importable there (defined in a module, not in a notebook). `workers=0` runs in this process.

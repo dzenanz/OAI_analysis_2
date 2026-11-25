@@ -12,7 +12,7 @@ import pytest
 
 from oai_analysis import OAPipeline, io, parallel, provenance, qc
 from oai_analysis.atlas import Atlas
-from oai_analysis.project import CHECKS_FORMAT, Project, choose_series, read_manifest
+from oai_analysis.project import CHECKS_FORMAT, DEFAULT_RETENTION, Project, choose_series, read_manifest
 from oai_analysis.stages import Preprocessor, QCFinding
 from test.test_stages import (
     ConstantThickness,
@@ -63,7 +63,8 @@ def project(tmp_path):
         itk.imwrite(image, str(tmp_path / name))
     cases = [{"case_id": "1_00M_LEFT", "patient_id": "1", "month": 0, "laterality": "left", "input": "a.nrrd"},
              {"case_id": "2_00M_RIGHT", "patient_id": "2", "month": 0, "laterality": "right", "input": "b.nrrd"}]
-    return Project.create(tmp_path / "project", cases, {"workers": 0}, data_root=tmp_path)
+    keep = {step: "keep" for step in DEFAULT_RETENTION}  # the tests look at the outputs of every step
+    return Project.create(tmp_path / "project", cases, {"workers": 0}, data_root=tmp_path, retention=keep)
 
 
 def started_times(project, case_id):
@@ -91,7 +92,8 @@ def test_run_and_resume(project):
 
     folder = project.case_folder("1_00M_LEFT")
     assert sorted(p.name for p in (folder / "03_register").iterdir()) == ["phi_AB.h5", "phi_BA.h5", "provenance.json"]
-    assert not (folder / "05_thickness" / "FC_inner.vtk").exists()  # intermediates only with retention: all
+    assert not (folder / "05_thickness" / "FC_inner.vtk").exists()  # intermediates only with keep_all
+    np.testing.assert_array_equal(itk.imread(str(folder / "00_input" / "input.nrrd")), ball_image())
     record = json.loads((folder / "05_thickness" / "provenance.json").read_text())
     assert record["status"] == "complete" and record["params"] == {"name": "constant", "thickness": 2.0}
     assert set(record["inputs"]) >= {"atlas", "mesh/FC_mesh", "register/phi_AB"}
@@ -181,12 +183,13 @@ def test_from_step(project):
         "mesh", "thickness", "atlas_map", "biomarkers/mean_thickness"]
 
 
-def test_retention_final(project):
-    project.settings["retention"] = "final"
+def test_default_retention(project):
+    project.retention = {**DEFAULT_RETENTION, "thickness": "keep_all"}
     pipeline = make_pipeline(extractor=AtlasOnlyMeanThickness())
     project.run(["1_00M_LEFT"], pipeline=pipeline, echo=lambda text: None)
     folder = project.case_folder("1_00M_LEFT")
     assert [p.name for p in (folder / "02_segment").iterdir()] == ["provenance.json"]
+    assert (folder / "00_input" / "input.nrrd").is_file() and (folder / "05_thickness" / "FC_inner.vtk").is_file()
     assert (folder / "06_atlas_map" / "FC_atlas.vtk").is_file()
     assert project.status(pipeline)[0].status == "Succeeded"
 
@@ -438,8 +441,8 @@ def test_review_flags(project):
 
 
 def test_recheck_from_measures(project):
-    """A new threshold rechecks a step from the measures in its provenance, even after retention: final."""
-    project.settings["retention"] = "final"
+    """A new threshold rechecks a step from the measures in its provenance, even after its outputs were deleted."""
+    project.retention = dict(DEFAULT_RETENTION)
     pipeline = make_pipeline(extractor=AtlasOnlyMeanThickness())
     pipeline.thickness_estimator = MeasuredThickness(thickness=4.0)
     result = project.run(pipeline=pipeline, echo=lambda text: None)

@@ -156,7 +156,7 @@ oai-analysis run M:/OAI_projects/pilot --cases 9016304_00M_LEFT --from mesh
 oai-analysis run M:/OAI_projects/pilot --workers 4                # CPU worker processes (default: auto)
 oai-analysis status M:/OAI_projects/pilot --needs-review --csv flagged.csv
 ```
-Settings are in `project.yaml` (the pipeline config, plus `workers`, `retention: checkpoints|all|final` and
+Settings are in `project.yaml` (the pipeline config, plus `workers`, `retention` per step and
 the storage formats), and the cases are in `cases.csv`, which can be edited. Each run writes a full log and a plain-English
 summary to `logs/`, and a one-row-per-case table to `index.parquet`.
 

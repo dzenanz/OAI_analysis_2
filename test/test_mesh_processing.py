@@ -129,3 +129,28 @@ def test_split_cell_ids_match_split_mesh(num_iterations):
             cut = mp.get_vtk_sub_mesh(mesh, ids)
             np.testing.assert_array_equal(vtk.util.numpy_support.vtk_to_numpy(cut.GetPoints().GetData()),
                                           vtk.util.numpy_support.vtk_to_numpy(split.GetPoints().GetData()))
+
+
+def test_split_unusual_cartilage():
+    from oai_analysis.atlas import Atlas
+
+    def sphere(y):
+        source = vtk.vtkSphereSource()
+        source.SetCenter(0, y, 0)
+        source.SetRadius(10)
+        source.SetThetaResolution(40)
+        source.SetPhiResolution(40)
+        source.Update()
+        return source.GetOutput()
+
+    # tibial cartilage in one piece (two are usual)
+    inner_ids, outer_ids = mp.get_split_cell_ids(sphere(0), Atlas.default().inner_mesh["TC"], "TC", num_iterations=0)
+    assert len(inner_ids) > 0 and len(outer_ids) > 0
+
+    # femoral cartilage missing in the middle third along y
+    both = vtk.vtkAppendPolyData()
+    both.AddInputData(sphere(0))
+    both.AddInputData(sphere(100))
+    both.Update()
+    inner, outer = mp.split_mesh_face_lists(both.GetOutput(), "FC")
+    assert len(inner) > 0 and len(outer) > 0

@@ -313,6 +313,8 @@ def femoral_face_lists(mesh, face_normal, face_centroid, num_divisions=3):
         lower_y = min_y + step_value * i
         upper_y = lower_y + step_value
         current_indices = np.where((y_coord >= lower_y) & (y_coord < upper_y))[0]
+        if len(current_indices) < 2:  # e.g. cartilage missing in the middle; two clusters need two faces
+            continue
 
         mesh_centroids_normalized_extracted = mesh_centroids_normalized[current_indices]
         face_normal_value_extracted = face_normal[current_indices]
@@ -505,7 +507,7 @@ def filter_islands_and_smooth(vtk_mesh, atlas_mesh, mesh_type="FC", num_iteratio
         indices_to_keep.append(sorted_indices[region_iterator])
         region_iterator += 1
 
-    if mesh_type == "TC" and region_iterator < 2:
+    if mesh_type == "TC" and region_iterator < 2 and len(sorted_indices) > 1:  # the tibial cartilage can be one piece
         indices_to_keep.append(sorted_indices[1])  # Second largest region
         region_iterator += 1
 
